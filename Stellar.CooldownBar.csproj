@@ -15,4 +15,10 @@
     <PackageReference Include="Stellar.Abstractions" Version="1.1.1" />
     <PackageReference Include="Stellar.Plugin.InteropRefs" Version="1.1.1" />
   </ItemGroup>
+
+  <!-- Settings-gear icon (read by LogicalName for the mini-HUD header button). Without it the published DLL
+       ships iconless and the gear falls back to a blank/placeholder. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources/settings-gear.png" LogicalName="Stellar.CooldownBar.settings-gear.png" />
+  </ItemGroup>
 </Project>
