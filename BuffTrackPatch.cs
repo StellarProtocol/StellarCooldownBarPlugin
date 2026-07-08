@@ -19,6 +19,7 @@ public sealed class BuffTrackEntry
     public string SkillName    { get; internal set; } = "";
     public long   Duration     { get; internal set; }   // ms; 0 = permanent
 
+    internal long  CreateTime;   // game time (ms) at (re)application; changes when a stack refreshes the buff
     internal long  SnapTick;
     internal float SnapRemain;
 
@@ -47,6 +48,7 @@ internal static partial class BuffTrackPatch
     private static PropertyInfo? _piBuffItemLayer;
     private static PropertyInfo? _piBuffItemLevel;
     private static PropertyInfo? _piBuffItemDuration;
+    private static PropertyInfo? _piBuffItemCreateTime;
     private static bool          _buffItemFieldsResolved;
 
     private static PropertyInfo? _piClientBuffList;
@@ -56,6 +58,7 @@ internal static partial class BuffTrackPatch
     private static PropertyInfo? _piClientBuffId;
     private static PropertyInfo? _piClientBuffMaxLife;
     private static PropertyInfo? _piClientBuffLayer;
+    private static PropertyInfo? _piClientBuffCreateTime;
     private static FieldInfo?    _fiIsInValid;
     private static bool          _clientBuffInfoResolved;
 
@@ -133,9 +136,11 @@ internal static partial class BuffTrackPatch
         _localBuffComp = _localClientBuffComp = null;
         _piShowedBuffList = null; _showedListResolved = false;
         _piBuffItemUuid = _piBuffItemBaseId = _piBuffItemLayer = _piBuffItemLevel = _piBuffItemDuration = null;
+        _piBuffItemCreateTime = null;
         _buffItemFieldsResolved = false;
         _piClientBuffList = null; _clientListResolved = false;
         _piClientBuffUuid = _piClientBuffId = _piClientBuffMaxLife = _piClientBuffLayer = null;
+        _piClientBuffCreateTime = null;
         _fiIsInValid = null; _clientBuffInfoResolved = false;
         _piZComponentHost = _piZEntityUuid = null; _hostReflResolved = false;
         _entityMgrInst = null; _miGetPlayerUuid = null; _entityMgrResolved = false;
@@ -175,7 +180,8 @@ internal static partial class BuffTrackPatch
                         int layer  = (int)(_piBuffItemLayer?.GetValue(item)    ?? 1);
                         int level  = (int)(_piBuffItemLevel?.GetValue(item)    ?? 0);
                         long durMs = (long)(_piBuffItemDuration?.GetValue(item) ?? 0L);
-                        UpsertServerBuff(uuid, baseId, layer, level, durMs);
+                        long createMs = (long)(_piBuffItemCreateTime?.GetValue(item) ?? 0L);
+                        UpsertServerBuff(uuid, baseId, layer, level, durMs, createMs);
                     }
                 }
                 catch (Exception ex) { LogError("server list", ex); }
@@ -202,7 +208,8 @@ internal static partial class BuffTrackPatch
                         int buffId = (int)(_piClientBuffId?.GetValue(item)     ?? 0);
                         int layer  = (int)(_piClientBuffLayer?.GetValue(item)  ?? 1);
                         float maxL = (float)(_piClientBuffMaxLife?.GetValue(item) ?? 0f);
-                        UpsertClientBuff(uuid, buffId, layer, maxL);
+                        long createMs = (long)(double)(_piClientBuffCreateTime?.GetValue(item) ?? 0d);
+                        UpsertClientBuff(uuid, buffId, layer, maxL, createMs);
                     }
                 }
                 catch (Exception ex) { LogError("client list", ex); }
@@ -215,9 +222,10 @@ internal static partial class BuffTrackPatch
         foreach (var k in stale) { _activeBuffs.Remove(k); _buffSourceSkillId.Remove(k); }
     }
 
-    private static void UpsertServerBuff(int uuid, int baseId, int layer, int level, long durMs)
+    private static void UpsertServerBuff(int uuid, int baseId, int layer, int level, long durMs, long createMs)
     {
-        if (!_activeBuffs.TryGetValue(uuid, out var entry))
+        bool isNew = !_activeBuffs.TryGetValue(uuid, out var entry);
+        if (isNew)
         {
             entry = new BuffTrackEntry(uuid);
             _activeBuffs[uuid] = entry;
@@ -227,18 +235,23 @@ internal static partial class BuffTrackPatch
             entry.Visible = vis; entry.BuffType = bt;
             entry.SkillId = sid; entry.SkillName = GetSkillName(sid);
         }
-        entry.Layer = layer; entry.Level = level;
-        if (entry.Duration != durMs)
+        entry!.Layer = layer; entry.Level = level;
+        // Re-snap remaining whenever the total duration OR the create time changes. A stacking buff
+        // refresh keeps the same Duration but resets CreateTime — without the CreateTime check the
+        // timer would keep counting down from the original application and the tile would expire early.
+        if (isNew || entry.Duration != durMs || entry.CreateTime != createMs)
         {
             entry.Duration   = durMs;
+            entry.CreateTime = createMs;
             entry.SnapTick   = Environment.TickCount64;
             entry.SnapRemain = durMs > 0 ? durMs / 1000f : -1f;
         }
     }
 
-    private static void UpsertClientBuff(int uuid, int buffId, int layer, float maxLife)
+    private static void UpsertClientBuff(int uuid, int buffId, int layer, float maxLife, long createMs)
     {
-        if (!_activeBuffs.TryGetValue(uuid, out var entry))
+        bool isNew = !_activeBuffs.TryGetValue(uuid, out var entry);
+        if (isNew)
         {
             entry = new BuffTrackEntry(uuid) { IsClientBuff = true };
             _activeBuffs[uuid] = entry;
@@ -246,11 +259,18 @@ internal static partial class BuffTrackPatch
             entry.BuffBaseId = buffId; entry.BuffName = nm;
             entry.Visible = vis; entry.BuffType = bt;
             entry.SkillId = sid; entry.SkillName = GetSkillName(sid);
-            entry.Duration   = maxLife > 0f ? (long)(maxLife * 1000f) : 0L;
+        }
+        entry!.Layer = layer;
+        // Re-snap on refresh: a stacking client buff resets CreateTime (and restores BuffMaxLife) when a
+        // new stack lands, but keeps the same uuid. Mirror the server-buff handling so it doesn't expire early.
+        long durMs = maxLife > 0f ? (long)(maxLife * 1000f) : 0L;
+        if (isNew || entry.CreateTime != createMs || entry.Duration != durMs)
+        {
+            entry.Duration   = durMs;
+            entry.CreateTime = createMs;
             entry.SnapTick   = Environment.TickCount64;
             entry.SnapRemain = maxLife > 0f ? maxLife : -1f;
         }
-        entry.Layer = layer;
     }
 
     private static void PostfixOnAddBuff(object __instance, object __0, bool __1)
@@ -401,6 +421,7 @@ internal static partial class BuffTrackPatch
             else if (p.Name == "Layer")      _piBuffItemLayer    = p;
             else if (p.Name == "Level")      _piBuffItemLevel    = p;
             else if (p.Name == "Duration")   _piBuffItemDuration = p;
+            else if (p.Name == "CreateTime") _piBuffItemCreateTime = p;
         }
     }
 
@@ -419,6 +440,7 @@ internal static partial class BuffTrackPatch
         _piClientBuffId      = t.GetProperty("BuffId",       BindingFlags.Public | BindingFlags.Instance);
         _piClientBuffMaxLife = t.GetProperty("BuffMaxLife",  BindingFlags.Public | BindingFlags.Instance);
         _piClientBuffLayer   = t.GetProperty("CurrentLayer", BindingFlags.Public | BindingFlags.Instance);
+        _piClientBuffCreateTime = t.GetProperty("CreateTime", BindingFlags.Public | BindingFlags.Instance);
         _fiIsInValid         = t.GetField("IsInValid",       BindingFlags.Public | BindingFlags.Instance);
     }
 }
