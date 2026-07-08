@@ -1,160 +1,151 @@
 using System;
-using Stellar.Abstractions.Domain;
+using System.Collections.Generic;
+using UnityEngine;
 
 namespace Stellar.CooldownBar;
 
-// Per-tick: observe everything into the seen registry (for the picker), auto-track imagine lockouts, and
-// build the active+tracked TrackedTile[] snapshot the overlay renders.
 public sealed partial class Plugin
 {
-    private long NowMs(out bool fallback)
+    private const float TileW      = 44f;   // CdTileIcon in WindowBuilder.CooldownTile.cs
+    private const float TileHGap   = 6f;   // horizontal gap between tiles
+    private const float TileRowH   = 62f;  // icon(44) + vlg.spacing(2) + secs text(~16)
+    private const float TileVGap   = 6f;   // vertical gap between tile rows
+    private const float ChromePadH = 24f;  // 2 × 12px borderless left+right chrome padding
+    private const float BaseH      = 130f; // single-row baseline window height
+    private const int   MaxRows    = 3;    // rows in the UI
+
+    // Arrival-order tracking: maps (kind, id) → monotonic sequence number assigned on first appearance.
+    // Pruned each tick so a re-activated tile gets a fresh (later) number instead of keeping its old position.
+    private readonly Dictionary<(TileKind, int), int> _arrivalOrder = new();
+    private readonly (TileKind, int)[] _activeBuf = new (TileKind, int)[MaxTiles];
+    private readonly List<(TileKind, int)> _staleKeys = new();
+    private int _arrivalSeq;
+    private TileComparer? _tileComparer;
+
+    private int _tilesPerRow;     // tiles that fit in current width (capped at MaxTiles/MaxRows)
+    private int _rowsVisible;     // rows that fit in current height (1 or MaxRows)
+    private int _totalTileCount;  // raw active count before display cap (for overflow indicator)
+
+    // _bar.Rect is stale during resize (TickResize writes sizeDelta directly, bypassing SetRect).
+    // Cache the root RectTransform and read rect.width/height directly for live values.
+    private RectTransform? _barRt;
+    private float BarWidth  => (_barRt ??= GameObject.Find("cooldownbar.main")?.GetComponent<RectTransform>()) != null ? _barRt!.rect.width  : _bar.Rect.Width;
+    private float BarHeight => (_barRt ??= GameObject.Find("cooldownbar.main")?.GetComponent<RectTransform>()) != null ? _barRt!.rect.height : _bar.Rect.Height;
+
+    private void UpdateArrivalOrder(int n)
     {
-        long server = _services.CombatSnapshot.ServerNowMs;
-        fallback = server == 0;
-        return fallback ? Environment.TickCount : server;
+        for (int i = 0; i < n; i++)
+        {
+            var key = (_tiles[i].Kind, _tiles[i].Id);
+            _activeBuf[i] = key;
+            if (!_arrivalOrder.ContainsKey(key)) _arrivalOrder[key] = _arrivalSeq++;
+        }
+        _staleKeys.Clear();
+        foreach (var k in _arrivalOrder.Keys)
+        {
+            bool found = false;
+            for (int i = 0; i < n; i++) if (_activeBuf[i].Equals(k)) { found = true; break; }
+            if (!found) _staleKeys.Add(k);
+        }
+        foreach (var k in _staleKeys) _arrivalOrder.Remove(k);
     }
 
     private void RebuildSnapshot()
     {
-        long now = NowMs(out bool fallback);
+        BuffTrackPatch.RefreshActiveBuffs();
         int n = 0;
-        var cds = _services.CombatSnapshot.LocalCooldowns;
-        for (int i = 0; i < cds.Count && n < MaxTiles; i++) TryAddCooldown(cds[i], now, fallback, ref n);
-        var buffs = _services.CombatSnapshot.LocalBuffs;
-        for (int i = 0; i < buffs.Count && n < MaxTiles; i++) TryAddDebuff(buffs[i], now, fallback, ref n);
-        // Sort active window [0,n): cooldowns before debuffs, each ascending by remaining (most-urgent left).
-        if (n > 1) Array.Sort(_tiles, 0, n, TileComparer.Instance);
-        _tileCount = n;
-    }
 
-    private void TryAddCooldown(in SkillCooldown cd, long now, bool fallback, ref int n)
-    {
-        // LocalCooldowns are keyed by the leveled SkillFightLevel id (baseSkillId*100 + level); resolve to the base
-        // skill so name (GetSkill) + icon (LoadSkillIcon) — which live on SkillTable[base] — work, and leveled
-        // variants collapse to one entry. 0 = internal marker / talent-trigger with no name (e.g. "场地标记") → skip.
-        int baseId = ResolveNamedBaseSkill(cd.SkillId);
-        if (baseId == 0) return;
-        _seen.Observe(TileKind.Cooldown, baseId);
-        if (!_selection.IsCooldownTracked(baseId)) return;
+        bool skillExclude  = _selection.SkillMode  == TrackMode.ExcludeBelow;
+        bool debuffExclude = _selection.DebuffMode == TrackMode.ExcludeBelow;
+        bool buffExclude   = _selection.BuffMode   == TrackMode.ExcludeBelow;
 
-        var imagine = _services.ResonanceData.GetImagineForSkill(cd.SkillId);
-        bool isImagine = imagine is { ChargeCount: > 1 };
-        int effDur = EffectiveDur(cd, isImagine);
-        long curRem = (cd.BeginTimeMs + effDur) - now;   // remaining on the CURRENT recharge window
-
-        // Multi-charge skills (imagines): the wire only moves `begin` ON CAST and gives no live charge count, and
-        // after the first charge's window expires it tells us NOTHING about the remaining charges still recharging.
-        // So simulate the sequential recharge ourselves (count down N*perCharge → 0 continuously) — see ImagineSim.
-        if (isImagine && imagine is { } imi)
+        foreach (var entry in SkillCDPatch.ActiveCDs.Values)
         {
-            int perCharge = effDur > 0 ? effDur : imi.RechargeMs;
-            var rc = _imgCalc.Update(baseId, cd.BeginTimeMs, perCharge, imi.ChargeCount, now);
-            if (!rc.Active) return;   // full → ready
-            _tiles[n++] = new TrackedTile(TileKind.Cooldown, baseId, false, baseId,
-                rc.FullFraction, rc.ToFullMs, rc.ChargesAvailable, fallback);
-            return;
+            if (n >= MaxTiles) break;
+            int baseId = ResolveNamedBaseSkill(entry.SkillId);
+            if (baseId == 0) continue;
+            bool inList = _selection.IsCooldownTracked(baseId);
+            if (skillExclude ? inList : !inList) continue;
+            float rem = SkillCDPatch.GetRemainSec(entry);
+            if (rem <= 0f) continue;
+            float fill     = Clamp01(1f - rem / Math.Max(0.001f, entry.TotalSec));
+            bool isImagine = entry.MaxCharges > 1;
+            _tiles[n++] = new TrackedTile(TileKind.Cooldown, baseId, isImagine, baseId,
+                fill, (int)(rem * 1000f), isImagine ? entry.PendingCharges : 0, false);
         }
 
-        // Single-charge / normal skill: plain remaining on the one cooldown window, minus banked cd-acceleration
-        // (Tina's buff etc.) — see ApplyAccelBank.
-        long effRem = ApplyAccelBank(baseId, cd.BeginTimeMs, now, curRem, isImagine);
-        if (effRem <= 0) return;
-        float fill = 1f - effRem / (float)Math.Max(1, effDur);
-        _tiles[n++] = new TrackedTile(TileKind.Cooldown, baseId, false, baseId,
-            Clamp01(fill), (int)effRem, cd.Kind == SkillCooldownKind.Charge ? cd.ChargeCount : 0, fallback);
+        foreach (var entry in BuffTrackPatch.ActiveBuffs.Values)
+        {
+            if (n >= MaxTiles) break;
+            if (entry.BuffType != 0) continue;                               // only debuffs
+            if (string.IsNullOrEmpty(entry.BuffName)) continue;
+            if (entry.Duration > 0 && entry.RemainSec < 0.05f) continue;
+
+            var cls = ClassifyDebuff(entry);
+            if (cls.IsImagine && !debuffExclude) _selection.AutoTrackImagine(entry.BuffBaseId);
+            bool dbInList = _selection.IsDebuffTracked(entry.BuffBaseId);
+            if (debuffExclude ? dbInList : !dbInList) continue;
+
+            bool dbPerm  = entry.Duration == 0;
+            float remSec = dbPerm ? -1f : entry.RemainSec;
+            float fill   = dbPerm ? 1f : Clamp01(remSec / Math.Max(0.001f, entry.Duration / 1000f));
+            _tiles[n++] = new TrackedTile(TileKind.Debuff, entry.BuffBaseId, cls.IsImagine, entry.SkillId,
+                fill, dbPerm ? -1 : (int)(remSec * 1000f), entry.Layer, false);
+        }
+
+        foreach (var entry in BuffTrackPatch.ActiveBuffs.Values)
+        {
+            if (n >= MaxTiles) break;
+            if (entry.BuffType == 0) continue;                               // only buffs (not debuffs)
+            if (string.IsNullOrEmpty(entry.BuffName)) continue;
+            if (entry.Duration > 0 && entry.RemainSec < 0.05f) continue;
+            bool bfInList = _selection.IsBuffTracked(entry.BuffBaseId);
+            if (buffExclude ? bfInList : !bfInList) continue;
+
+            bool bfPerm   = entry.Duration == 0;
+            float bRemSec = bfPerm ? -1f : entry.RemainSec;
+            float bFill   = bfPerm ? 1f : Clamp01(bRemSec / Math.Max(0.001f, entry.Duration / 1000f));
+            _tiles[n++] = new TrackedTile(TileKind.Buff, entry.BuffBaseId, false, entry.SkillId,
+                bFill, bfPerm ? -1 : (int)(bRemSec * 1000f), entry.Layer, false);
+        }
+
+        UpdateArrivalOrder(n);
+        _tileComparer ??= new TileComparer(_arrivalOrder);
+        if (n > 1) Array.Sort(_tiles, 0, n, _tileComparer);
+        _tilesPerRow    = ComputeTilesPerRow();
+        _rowsVisible    = ComputeRowsVisible();
+        _totalTileCount = n;
+        _tileCount      = Math.Min(n, _tilesPerRow * _rowsVisible);
     }
 
-    // cd-ACCELERATION banking. The cd-accel attrs (11960 skill / 11980 imagine, read live from the entity map and
-    // reverting when the buff ends) speed the countdown RATE while active — the game advances the cooldown by
-    // dt*(1+accel/10000) and BANKS the saved time, so it stays ahead during AND after the buff. We integrate the
-    // saved time per cooldown: bank += dt * accel/10000 each refresh, then show rawRem - bank. accel=0 → no growth
-    // (no stuck); a new cast (begin change) resets the bank. Keyed by the resolved base skill id.
-    private readonly System.Collections.Generic.Dictionary<int, (long Begin, long LastTick, double BankMs)> _accelBank = new();
-    private long ApplyAccelBank(int baseId, long begin, long now, long rawRemMs, bool isImagine)
+    // Classify a debuff entry as imagine lockout, using both the curated map and FightSourceInfo source skill.
+    private DebuffAttribution.Result ClassifyDebuff(BuffTrackEntry entry)
     {
-        long accel = ReadEntityCdAttr(CdAccelSkillAttr) + (isImagine ? ReadEntityCdAttr(CdAccelImagineAttr) : 0);
-        if (!_accelBank.TryGetValue(baseId, out var s) || s.Begin != begin)
-        {
-            s = (begin, now, 0.0);   // new cast (or first sight) → fresh bank
-        }
-        else
-        {
-            long dt = now - s.LastTick;
-            if (dt > 0 && dt <= 2000 && accel > 0) s.BankMs += dt * (accel / 10000.0);   // cap dt so a refresh gap can't over-bank
-            s.LastTick = now;
-        }
-        _accelBank[baseId] = s;
-        return rawRemMs - (long)s.BankMs;
+        var cls = _attr.Classify(entry.BuffBaseId);
+        if (!cls.IsImagine && entry.SkillId > 0
+            && _services.ResonanceData.GetImagineForSkill(entry.SkillId) is not null)
+            cls = new DebuffAttribution.Result(true, entry.SkillId);
+        return cls;
     }
 
-    private void TryAddDebuff(in ActiveBuff b, long now, bool fallback, ref int n)
+    private int ComputeTilesPerRow()
     {
-        var info = _services.GameData.Combat.GetBuff(b.BaseId);
-        if (info is not { } bi || !bi.IsDebuff || bi.Name.Length == 0) return;   // skip non-debuffs + nameless internals
+        float inner = BarWidth - ChromePadH;
+        if (inner <= 0f) return MaxTiles / MaxRows;
+        return Math.Min(MaxTiles / MaxRows, Math.Max(1, (int)((inner + TileHGap) / (TileW + TileHGap))));
+    }
 
-        _seen.Observe(TileKind.Debuff, b.BaseId);
-        var cls = _attr.Classify(b.BaseId);
-        if (cls.IsImagine) _selection.AutoTrackImagine(b.BaseId);   // headline default; opt-out honoured
-
-        if (!_selection.IsDebuffTracked(b.BaseId)) return;
-        long rem = (b.CreateTimeMs + b.DurationMs) - now;
-        if (rem <= 0) return;
-        float fill = 1f - rem / (float)Math.Max(1, b.DurationMs);
-        _tiles[n++] = new TrackedTile(TileKind.Debuff, b.BaseId, cls.IsImagine, cls.ImagineSkillId,
-            Clamp01(fill), (int)rem, 0, fallback);
+    private int ComputeRowsVisible()
+    {
+        float h = BarHeight;
+        if (h <= 0f) return 1;
+        return Math.Min(MaxRows, Math.Max(1, (int)((h - BaseH) / (TileRowH + TileVGap)) + 1));
     }
 
     private static float Clamp01(float v) => v < 0f ? 0f : v > 1f ? 1f : v;
 
-    // Cooldown reduction (NOT haste). The real, per-character/gear reduction lives in these FLOAT-stored attrs
-    // (the stats probe now reads them via TryGetAttr<float>). The wire SkillCD's own per-cast fields
-    // (sub_cd_ratio field 9 / sub_cd_fixed field 10) take precedence when the server populates them; otherwise we
-    // fall back to the player attrs:
-    //        11760 技能冷却缩减万分比 — cd reduction RATIO (per-10000)
-    //        11750 技能冷却缩减毫秒   — cd reduction FLAT (ms)
-    //        11960 / 11980          — cd-ACCELERATION (skill / imagine), per-10000 — incl. temp buffs (Tina's)
-    // effDur = dur*(1 - (ratio+accel)/10000) - fixedMs. This is a VARIABLE value: the old hardcoded 10% only
-    // matched gear where 11760 happened to be 1000; reading the live attr is correct for all imagines (e.g. Tina
-    // 150s table → ~140s when 11760≈667), and tracks/reverts Tina's cd-accel buff because the read is live.
-    internal const int CdReductionAttr      = 11760;   // ratio, per-10000
-    internal const int CdReductionFixedAttr = 11750;   // flat, ms
-    internal const int CdAccelSkillAttr     = 11960;   // skill cd-acceleration, per-10000
-    internal const int CdAccelImagineAttr   = 11980;   // imagine cd-acceleration, per-10000
-    private int EffectiveDur(in SkillCooldown cd, bool isImagine)
-    {
-        // GEAR cooldown reduction only: wire sub_cd fields when populated, else the player's 11760 (ratio) / 11750
-        // (flat) read from the wire-captured entity attr map. These are gear-stable, so the recharge is correct
-        // per-character (Muku/Boyce and Tina/Airona alike). The cd-ACCELERATION attrs (11960/11980 — Tina's buff)
-        // are deliberately NOT applied: that buff speeds the countdown RATE, not the total duration, so folding it
-        // into effDur both mis-modelled it AND stuck (its value never reverts in the wire map). Rate-based accel is
-        // the deferred item.
-        long ratio   = cd.SubCdRatio   != 0 ? cd.SubCdRatio   : ReadEntityCdAttr(CdReductionAttr);
-        long fixedMs = cd.SubCdFixedMs != 0 ? cd.SubCdFixedMs : ReadEntityCdAttr(CdReductionFixedAttr);
-        int afterRatio = Stellar.Abstractions.Domain.GameData.ImagineCooldownCalc.EffectiveDuration(
-            cd.DurationMs, cd.ValidCdTimeMs, ratio / 10000f);
-        int eff = afterRatio - (int)fixedMs;
-        return eff < 1 ? 1 : eff;
-    }
-
-    // Read a cooldown attribute from the wire-captured LOCAL-entity attr map (EntityDetail.GetAttributes). This is
-    // the only source that carries the gear cd-reduction (11760/11750): PlayerStats/MainEntity reports them
-    // unreadable as Int64/Int32/Float. Returns 0 when absent.
-    private long ReadEntityCdAttr(int attrId)
-    {
-        var local = _services.CombatSnapshot.LocalEntityId;
-        return !local.IsNone && _services.EntityDetail.GetAttributes(local).TryGetValue(attrId, out var v) ? v : 0;
-    }
-
-    // Sequential-recharge simulator for multi-charge imagines — shared with CombatMeter so the two can't drift.
-    private readonly Stellar.Abstractions.Domain.GameData.ImagineCooldownCalc _imgCalc = new();
-
-    // Resolve a cooldown's leveled SkillFightLevel id (baseSkillId*100 + level) to its base skill id, IF that base
-    // has a readable name. Returns the named base id, or 0 when neither the leveled id nor its base resolves to a
-    // named SkillTable row (internal markers / talent-triggers like "场地标记" — filtered from the picker).
-    // Memoized — but ONLY on success: the hot-update SkillTable can finish loading AFTER the first cooldown
-    // arrives (e.g. casting immediately on relaunch), so caching a miss would permanently hide that cooldown for
-    // the session. Leaving misses uncached lets the lookup retry each frame until the table is ready, then lock in.
-    private readonly System.Collections.Generic.Dictionary<int, int> _baseSkillMemo = new();
+    // Memoize success only — table may finish loading after first CD arrives.
+    private readonly Dictionary<int, int> _baseSkillMemo = new();
     private int ResolveNamedBaseSkill(int cdId)
     {
         if (_baseSkillMemo.TryGetValue(cdId, out var cached)) return cached;
@@ -162,17 +153,19 @@ public sealed partial class Plugin
         int resolved = 0;
         if (combat.GetSkill(cdId) is { Name.Length: > 0 }) resolved = cdId;
         else { int b = cdId / 100; if (b > 0 && combat.GetSkill(b) is { Name.Length: > 0 }) resolved = b; }
-        if (resolved != 0) _baseSkillMemo[cdId] = resolved;   // cache successes only — see remark above
+        if (resolved != 0) _baseSkillMemo[cdId] = resolved;
         return resolved;
     }
 
-    private sealed class TileComparer : System.Collections.Generic.IComparer<TrackedTile>
+    private sealed class TileComparer : IComparer<TrackedTile>
     {
-        public static readonly TileComparer Instance = new();
+        private readonly Dictionary<(TileKind, int), int> _order;
+        internal TileComparer(Dictionary<(TileKind, int), int> order) => _order = order;
         public int Compare(TrackedTile a, TrackedTile b)
         {
-            if (a.Kind != b.Kind) return a.Kind.CompareTo(b.Kind);   // Cooldown(0) before Debuff(1)
-            return a.RemainingMs.CompareTo(b.RemainingMs);
+            _order.TryGetValue((a.Kind, a.Id), out int oa);
+            _order.TryGetValue((b.Kind, b.Id), out int ob);
+            return oa.CompareTo(ob);
         }
     }
 }

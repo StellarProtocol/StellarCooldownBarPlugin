@@ -1,102 +1,311 @@
-using System;
-using System.Collections.Generic;
 using Stellar.Abstractions.Domain;
 using Stellar.Abstractions.Services;
 
 namespace Stellar.CooldownBar;
 
-// The "what to track" picker: a live list of every cooldown/debuff seen this session, grouped Skill cooldowns /
-// Debuffs (imagine lockouts pinned to the top of Debuffs, ★-prefixed), each row [icon] [name] [toggle]. Toggling
-// writes the config immediately; the bar reflects it on the next refresh.
+// Settings picker — 3 tabs (Skills / Debuffs / Buffs) each with search input + virtual list + toggle per row.
+// Tables are loaded lazily on first tab visit (game tables may not be ready at plugin init). Toggling a row
+// writes the config immediately; the bar reflects it on the next framework tick.
 public sealed partial class Plugin
 {
-    private const int   MaxRows = 64;
-    private const float ScrollH = 380f;
+    private static readonly ColorRgba ActiveTabCol      = new(0.35f, 0.78f, 1.00f, 1f);  // cyan  — Skills active
+    private static readonly ColorRgba InactiveTabCol    = new(0.65f, 0.65f, 0.65f, 1f);  // grey
+    private static readonly ColorRgba DebuffTabActiveCol = new(1.00f, 0.35f, 0.35f, 1f); // red   — Debuffs active
+    private static readonly ColorRgba BuffTabActiveCol   = new(0.35f, 1.00f, 0.50f, 1f); // green — Buffs active
+    private static readonly string[] ModeOptions = { "Show only selected", "Show all, exclude selected" };
 
-    // Flattened, grouped view of the seen registry, rebuilt each refresh into a reusable buffer (no per-frame alloc).
-    private readonly List<(TileKind Kind, int Id, bool IsImagine)> _rows = new(MaxRows);
-    private readonly UvRect[] _rowUv = new UvRect[MaxRows];
+    private int _activeTab = 0;   // 0 = Skills, 1 = Debuffs, 2 = Buffs
+    private bool _stScrollReset, _dtScrollReset, _btScrollReset;
 
     private IWindowControl BuildAndRegisterSettings()
         => _services.Windows.Register(new WindowRegistration(
             new WindowSpec(
                 Id:          "cooldownbar.settings",
                 Title:       "CooldownBar — Track",
-                DefaultRect: new WindowRect(900f, 120f, 320f, 460f),
+                DefaultRect: new WindowRect(900f, 120f, 360f, 500f),
                 Category:    WindowCategory.Tools,
                 Style:       WindowPanelStyle.GlassMenu)
             { StartVisible = false, HideUntilInWorld = true, Closable = true, Draggable = true },
             BuildSettingsRoot(),
             OnClose: () => _settings.SetVisible(false)));
 
+    private void SetBgOpacity(float v)
+    {
+        _bgOpacity = v;
+        _cfg.Set("bar.bg_opacity", v);
+        _cfg.Save();
+    }
+
     private HudElement BuildSettingsRoot()
     {
-        var rows = new HudElement[MaxRows];
-        for (var i = 0; i < MaxRows; i++)
+        var bgRow = new RowElement(new HudElement[]
         {
-            var idx = i;
-            rows[i] = new RowElement(new HudElement[]
-            {
-                new GameTextureElement(() => RowIcon(idx), 22, 22, () => _rowUv[idx]),
-                new TextElement(() => RowLabel(idx)),
-                new SpacerElement(Width: 0f),   // flexible → pushes the toggle to the right edge
-                new ToggleElement(() => "", () => RowTracked(idx), v => SetRowTracked(idx, v)),
-            }, Gap: 6f);
-        }
+            new TextElement(() => "Bar Background"),
+            new SpacerElement(Width: 0f),
+            new TextElement(() => $"{(int)System.Math.Round(_bgOpacity * 100)}%"),
+            new SliderElement(() => _bgOpacity, SetBgOpacity) { Width = 120f },
+        }, Gap: 6f);
+
+        var tabStrip = new RowElement(new HudElement[]
+        {
+            new CellElement(
+                new ButtonElement(() => "Skills",
+                    OnClick: () => { _activeTab = 0; EnsureSkillTabLoaded(); ApplySkillTabFilter(_stFilter); _stScrollReset = true; },
+                    Active: () => _activeTab == 0),
+                Weight: 1f),
+            new CellElement(
+                new ButtonElement(() => "Debuffs",
+                    OnClick: () => { _activeTab = 1; EnsureBuffTabLoaded(); ApplyDebuffTabFilter(_dtFilter); _dtScrollReset = true; },
+                    Active: () => _activeTab == 1),
+                Weight: 1f),
+            new CellElement(
+                new ButtonElement(() => "Buffs",
+                    OnClick: () => { _activeTab = 2; EnsureBuffTabLoaded(); ApplyBuffTabFilter(_btFilter); _btScrollReset = true; },
+                    Active: () => _activeTab == 2),
+                Weight: 1f),
+        }, Gap: 4f);
+
+        var modeRow = new RowElement(new HudElement[]
+        {
+            new TextElement(() => "Filter mode"),
+            new SpacerElement(Width: 0f),
+            new DropdownElement(
+                Selected: () => (int)ActiveTabMode(),
+                Options:  () => ModeOptions,
+                OnSelect: v => SetActiveTabMode((TrackMode)v),
+                Width: 210f),
+        }, Gap: 6f);
+
         return new ColumnElement(new HudElement[]
         {
-            new TextElement(() => "Track what appears on the bar", Emphasis: true),
-            new TextElement(() => "Cyan = cooldown · Red = debuff · ★ = Imagine lockout (auto-tracked)"),
+            bgRow,
             new SeparatorElement(),
-            new ScrollElement(new ListElement(() => VisibleRows(), rows), ScrollH),
+            new TextElement(() => "Toggle what appears on the CooldownBar", Emphasis: true),
+            tabStrip,
+            modeRow,
+            new SeparatorElement(),
+            new ConditionalElement(() => _activeTab == 0, BuildSkillsTab()),
+            new ConditionalElement(() => _activeTab == 1, BuildDebuffsTab()),
+            new ConditionalElement(() => _activeTab == 2, BuildBuffsTab()),
         }, Gap: 4f);
     }
 
-    // Rebuild the grouped row buffer: cooldowns first, then debuffs (imagine lockouts pinned to the top of debuffs).
-    private int VisibleRows()
+    private TrackMode ActiveTabMode() => _activeTab switch
     {
-        _rows.Clear();
-        foreach (var e in _seen.Entries)
-            if (e.Kind == TileKind.Cooldown) _rows.Add((e.Kind, e.Id, false));
-        foreach (var e in _seen.Entries)
-            if (e.Kind == TileKind.Debuff && _attr.Classify(e.Id).IsImagine) _rows.Add((e.Kind, e.Id, true));
-        foreach (var e in _seen.Entries)
-            if (e.Kind == TileKind.Debuff && !_attr.Classify(e.Id).IsImagine) _rows.Add((e.Kind, e.Id, false));
-        return Math.Min(_rows.Count, MaxRows);
+        0 => _selection.SkillMode,
+        1 => _selection.DebuffMode,
+        _ => _selection.BuffMode,
+    };
+
+    private void SetActiveTabMode(TrackMode m)
+    {
+        switch (_activeTab)
+        {
+            case 0: _selection.SetSkillMode(m);  break;
+            case 1: _selection.SetDebuffMode(m); break;
+            default: _selection.SetBuffMode(m);  break;
+        }
+        _selection.Save(_cfg);
     }
 
-    private object? RowIcon(int i)
+    // ── Tab content builders (called once; pool HudElements are reused) ───────
+
+    private HudElement BuildSkillsTab()
     {
-        if (i >= _rows.Count) { _rowUv[i] = new UvRect(0f, 0f, 1f, 1f); return null; }
-        var r = _rows[i];
-        if (r.IsImagine)                 return _services.GameAssets.LoadImagineIcon(_attr.Classify(r.Id).ImagineSkillId, out _rowUv[i]);
-        if (r.Kind == TileKind.Cooldown) return _services.GameAssets.LoadSkillIcon(r.Id, out _rowUv[i]);
-        return _services.GameAssets.LoadBuffIcon(r.Id, out _rowUv[i]);
+        var pool = new HudElement[SettingsPoolSize];
+        for (int i = 0; i < SettingsPoolSize; i++)
+        {
+            int idx = i;
+            pool[i] = new ConditionalElement(
+                () => _stOffset + idx < _stFiltCount,
+                new RowElement(new HudElement[]
+                {
+                    new SelectableElement(
+                        new RowElement(new HudElement[]
+                        {
+                            new CellElement(
+                                new GameTextureElement(() => StIcon(idx), 22, 22, () => _stUv[idx]),
+                                Width: 26f),
+                            new TextElement(() => StLabel(idx)),
+                        }, Gap: 4f),
+                        OnClick: () => OnSettingIconClick(TileKind.Cooldown, idx)),
+                    new SpacerElement(Width: 0f),
+                    new ToggleElement(() => "", () => StTracked(idx), v => SetStTracked(idx, v)),
+                }, Gap: 4f));
+        }
+        return new ColumnElement(new HudElement[]
+        {
+            new InputElement(
+                Get: () => _stFilter, Submit: ApplySkillTabFilter,
+                Width: 340f, OnChange: ApplySkillTabFilter),
+            new TextElement(() => $"{_stFiltCount} / {_stCount} skills"),
+            new VirtualListElement(
+                Count:    () => { EnsureSkillTabLoaded(); return _stFiltCount; },
+                RowHeight: 32f, Pool: pool,
+                OnWindow: i => _stOffset = i, Height: 340f)
+            { ResetScroll = () => { if (!_stScrollReset) return false; _stScrollReset = false; return true; } },
+        }, Gap: 4f);
     }
 
-    private string RowLabel(int i)
+    private HudElement BuildDebuffsTab()
     {
-        if (i >= _rows.Count) return "";
-        var r = _rows[i];
-        var name = r.Kind == TileKind.Cooldown
-            ? (_services.GameData.Combat.GetSkill(r.Id) is { Name.Length: > 0 } s ? s.Name : $"Skill {r.Id}")
-            : (_services.GameData.Combat.GetBuff(r.Id) is { Name.Length: > 0 } b ? b.Name : $"Buff {r.Id}");
-        return r.IsImagine ? "★ " + name : name;
+        var pool = new HudElement[SettingsPoolSize];
+        for (int i = 0; i < SettingsPoolSize; i++)
+        {
+            int idx = i;
+            pool[i] = new ConditionalElement(
+                () => _dtOffset + idx < _dtFiltCount,
+                new RowElement(new HudElement[]
+                {
+                    new SelectableElement(
+                        new RowElement(new HudElement[]
+                        {
+                            new CellElement(
+                                new GameTextureElement(() => DtIcon(idx), 22, 22, () => _dtUv[idx]),
+                                Width: 26f),
+                            new TextElement(() => DtLabel(idx)),
+                        }, Gap: 4f),
+                        OnClick: () => OnSettingIconClick(TileKind.Debuff, idx)),
+                    new SpacerElement(Width: 0f),
+                    new ToggleElement(() => "", () => DtTracked(idx), v => SetDtTracked(idx, v)),
+                }, Gap: 4f));
+        }
+        return new ColumnElement(new HudElement[]
+        {
+            new InputElement(
+                Get: () => _dtFilter, Submit: ApplyDebuffTabFilter,
+                Width: 340f, OnChange: ApplyDebuffTabFilter),
+            new TextElement(() => $"{_dtFiltCount} / {_dtCount} debuffs"),
+            new VirtualListElement(
+                Count:    () => { EnsureBuffTabLoaded(); return _dtFiltCount; },
+                RowHeight: 32f, Pool: pool,
+                OnWindow: i => _dtOffset = i, Height: 340f)
+            { ResetScroll = () => { if (!_dtScrollReset) return false; _dtScrollReset = false; return true; } },
+        }, Gap: 4f);
     }
 
-    private bool RowTracked(int i)
+    private HudElement BuildBuffsTab()
     {
-        if (i >= _rows.Count) return false;
-        var r = _rows[i];
-        return r.Kind == TileKind.Cooldown ? _selection.IsCooldownTracked(r.Id) : _selection.IsDebuffTracked(r.Id);
+        var pool = new HudElement[SettingsPoolSize];
+        for (int i = 0; i < SettingsPoolSize; i++)
+        {
+            int idx = i;
+            pool[i] = new ConditionalElement(
+                () => _btOffset + idx < _btFiltCount,
+                new RowElement(new HudElement[]
+                {
+                    new SelectableElement(
+                        new RowElement(new HudElement[]
+                        {
+                            new CellElement(
+                                new GameTextureElement(() => BtIcon(idx), 22, 22, () => _btUv[idx]),
+                                Width: 26f),
+                            new TextElement(() => BtLabel(idx)),
+                        }, Gap: 4f),
+                        OnClick: () => OnSettingIconClick(TileKind.Buff, idx)),
+                    new SpacerElement(Width: 0f),
+                    new ToggleElement(() => "", () => BtTracked(idx), v => SetBtTracked(idx, v)),
+                }, Gap: 4f));
+        }
+        return new ColumnElement(new HudElement[]
+        {
+            new InputElement(
+                Get: () => _btFilter, Submit: ApplyBuffTabFilter,
+                Width: 340f, OnChange: ApplyBuffTabFilter),
+            new TextElement(() => $"{_btFiltCount} / {_btCount} buffs"),
+            new VirtualListElement(
+                Count:    () => { EnsureBuffTabLoaded(); return _btFiltCount; },
+                RowHeight: 32f, Pool: pool,
+                OnWindow: i => _btOffset = i, Height: 340f)
+            { ResetScroll = () => { if (!_btScrollReset) return false; _btScrollReset = false; return true; } },
+        }, Gap: 4f);
     }
 
-    private void SetRowTracked(int i, bool on)
+    // ── Skills tab row helpers ────────────────────────────────────────────────
+
+    private object? StIcon(int idx)
     {
-        if (i >= _rows.Count) return;
-        var r = _rows[i];
-        if (r.Kind == TileKind.Cooldown) _selection.SetCooldown(r.Id, on);
-        else                             _selection.SetDebuff(r.Id, on);
-        _selection.Save(_cfg);   // persist immediately; bar reflects it next tick
+        int i = _stOffset + idx;
+        if (i >= _stFiltCount) { _stUv[idx] = default; return null; }
+        return _services.GameAssets.LoadImagineIcon(_stFiltIds[i], out _stUv[idx])
+            ?? _services.GameAssets.LoadSkillIcon(_stFiltIds[i], out _stUv[idx]);
+    }
+
+    private string StLabel(int idx)
+    {
+        int i = _stOffset + idx;
+        return i < _stFiltCount ? _stFiltNames[i] : "";
+    }
+
+    private bool StTracked(int idx)
+    {
+        int i = _stOffset + idx;
+        return i < _stFiltCount && _selection.IsCooldownTracked(_stFiltIds[i]);
+    }
+
+    private void SetStTracked(int idx, bool on)
+    {
+        int i = _stOffset + idx;
+        if (i >= _stFiltCount) return;
+        _selection.SetCooldown(_stFiltIds[i], on);
+        _selection.Save(_cfg);
+    }
+
+    // ── Debuffs tab row helpers ───────────────────────────────────────────────
+
+    private object? DtIcon(int idx)
+    {
+        int i = _dtOffset + idx;
+        if (i >= _dtFiltCount) { _dtUv[idx] = default; return null; }
+        return _services.GameAssets.LoadBuffIcon(_dtFiltIds[i], out _dtUv[idx]);
+    }
+
+    private string DtLabel(int idx)
+    {
+        int i = _dtOffset + idx;
+        return i < _dtFiltCount ? _dtFiltNames[i] : "";
+    }
+
+    private bool DtTracked(int idx)
+    {
+        int i = _dtOffset + idx;
+        return i < _dtFiltCount && _selection.IsDebuffTracked(_dtFiltIds[i]);
+    }
+
+    private void SetDtTracked(int idx, bool on)
+    {
+        int i = _dtOffset + idx;
+        if (i >= _dtFiltCount) return;
+        _selection.SetDebuff(_dtFiltIds[i], on);
+        _selection.Save(_cfg);
+    }
+
+    // ── Buffs tab row helpers ─────────────────────────────────────────────────
+
+    private object? BtIcon(int idx)
+    {
+        int i = _btOffset + idx;
+        if (i >= _btFiltCount) { _btUv[idx] = default; return null; }
+        return _services.GameAssets.LoadBuffIcon(_btFiltIds[i], out _btUv[idx]);
+    }
+
+    private string BtLabel(int idx)
+    {
+        int i = _btOffset + idx;
+        return i < _btFiltCount ? _btFiltNames[i] : "";
+    }
+
+    private bool BtTracked(int idx)
+    {
+        int i = _btOffset + idx;
+        return i < _btFiltCount && _selection.IsBuffTracked(_btFiltIds[i]);
+    }
+
+    private void SetBtTracked(int idx, bool on)
+    {
+        int i = _btOffset + idx;
+        if (i >= _btFiltCount) return;
+        _selection.SetBuff(_btFiltIds[i], on);
+        _selection.Save(_cfg);
     }
 }

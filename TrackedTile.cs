@@ -7,6 +7,8 @@ internal enum TileKind
     Cooldown,
     /// <summary>A self-debuff (red).</summary>
     Debuff,
+    /// <summary>A tracked buff (green).</summary>
+    Buff,
 }
 
 /// <summary>

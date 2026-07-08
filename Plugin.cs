@@ -15,37 +15,37 @@ public sealed partial class Plugin : IStellarPlugin
 {
     public string Name => "CooldownBar";
 
+    private const string HarmonyId = "stellar.cooldownbar";
+
     private readonly IPluginServices _services;
     private readonly IConfigSection _cfg;
     private readonly CooldownBarSelection _selection;
-    private readonly SeenRegistry _seen = new();
     private readonly DebuffAttribution _attr;
     private readonly IWindowControl _bar;
     private readonly IWindowControl _settings;
+    private readonly IWindowControl _tooltip;
     private readonly IHotkeyAction _toggleAction;
 
     // Live snapshot rebuilt each tick; read by the overlay Funcs on the same main thread (no lock).
     private TrackedTile[] _tiles = Array.Empty<TrackedTile>();
     private int _tileCount;
-    private const int MaxTiles = 16;
+    private const int MaxTiles = 64;
+
+    // Bar background: black at this opacity (0 = fully transparent, 1 = fully black). Persisted in config.
+    private float _bgOpacity;
 
     public Plugin(IPluginServices services)
     {
         _services = services;
         _cfg = _services.Config.GetSection("cooldownbar");
+        _bgOpacity = _cfg.Get("bar.bg_opacity", 0f);
         _selection = CooldownBarSelection.Load(_cfg);
         _attr = new DebuffAttribution(
-            buffSkillId:          id => _services.GameData.Combat.GetBuff(id)?.SkillId ?? 0,
-            isImagineSkill:       sk => _services.ResonanceData.GetImagineForSkill(sk) is not null,
-            curatedImagineByBuff: ImagineLockouts.Map);
+            buffSkillId:    id => _services.GameData.Combat.GetBuff(id)?.SkillId ?? 0,
+            isImagineSkill: sk => _services.ResonanceData.GetImagineForSkill(sk) is not null);
         _tiles = new TrackedTile[MaxTiles];
-        // Cooldown reduction (11760 ratio per-10000, 11750 flat ms) + acceleration attrs (11960/11980, gear/buffs)
-        // feed EffectiveDur. These are FLOAT-stored — the stats probe now reads them via TryGetAttr<float>, so the
-        // live value (per-gear baseline + temp buffs like Tina's cd-accel) is reflected instead of null.
-        _services.PlayerStats.Subscribe(CdReductionAttr);
-        _services.PlayerStats.Subscribe(CdReductionFixedAttr);
-        _services.PlayerStats.Subscribe(CdAccelSkillAttr);
-        _services.PlayerStats.Subscribe(CdAccelImagineAttr);
+        SkillCDPatch.Install(HarmonyId, _services.Log.Info);
+        BuffTrackPatch.Install(HarmonyId, _services.Log.Info);
 
         // Borderless window (chrome-less, HUD-like) via WindowBuilder — the icon-capable render path
         // (the HUD builder has no GameTextureElement support). Mirrors CombatMeter's overlay.
@@ -53,14 +53,17 @@ public sealed partial class Plugin : IStellarPlugin
             new WindowSpec(
                 Id:          "cooldownbar.main",
                 Title:       "CooldownBar",
-                DefaultRect: new WindowRect(897f, 940f, 320f, 96f),
+                DefaultRect: new WindowRect(897f, 940f, 320f, 130f),
                 Category:    WindowCategory.HUD,
                 Style:       WindowPanelStyle.Borderless)
             { StartVisible = true, HideUntilInWorld = true, Draggable = true,
-              EditModeDragOnly = true, AutoHideBehindGameMenus = true },
+              EditModeDragOnly = true, AutoHideBehindGameMenus = true,
+              Resizable = true, MinWidth = 150f, MaxWidth = 1600f, MinHeight = 130f, MaxHeight = 270f,
+              BackgroundOpacity = () => _bgOpacity },
             BuildRoot()));
 
         _settings = BuildAndRegisterSettings();
+        _tooltip  = BuildAndRegisterTooltip();
 
         _toggleAction = _services.Hotkeys.DeclareAction(
             new HotkeyAction(
@@ -75,14 +78,18 @@ public sealed partial class Plugin : IStellarPlugin
     public void Dispose()
     {
         _services.Framework.Update -= OnUpdate;
+        SkillCDPatch.Uninstall();
+        BuffTrackPatch.Uninstall();
         _toggleAction.Dispose();
+        _tooltip.Remove();
         _settings.Remove();
         _bar.Remove();
     }
 
     private void OnUpdate(float deltaTime)
     {
-        RebuildSnapshot();   // Plugin.Seen.cs — the window auto-refreshes its Funcs on the framework tick
+        RebuildSnapshot();        // Plugin.Seen.cs — the window auto-refreshes its Funcs on the framework tick
+        TickTooltipPlace();       // Plugin.Tooltip.cs — re-assert cursor rect after destroy-on-hide remount
         LogSnapshotDiag(deltaTime);   // Plugin.Diagnostics.cs — gated on STELLAR_DIAGNOSTICS
     }
 }
