@@ -5,6 +5,15 @@ using Stellar.Abstractions.Services;
 
 namespace Stellar.CooldownBar;
 
+/// <summary>How the checked list for a type is interpreted.</summary>
+internal enum TrackMode
+{
+    /// <summary>Show only items that are checked (default — preserves existing behaviour).</summary>
+    IncludeOnly  = 0,
+    /// <summary>Show every active item EXCEPT the ones that are checked.</summary>
+    ExcludeBelow = 1,
+}
+
 /// <summary>
 /// Persisted user selection for the CooldownBar: which skill cooldowns and which debuffs to show, plus an
 /// imagine opt-out set so auto-tracking an Imagine-lockout debuff never overrides a user who un-ticked it.
@@ -14,7 +23,16 @@ internal sealed class CooldownBarSelection
 {
     private readonly HashSet<int> _skills = new();
     private readonly HashSet<int> _debuffs = new();
+    private readonly HashSet<int> _buffs   = new();
     private readonly HashSet<int> _imagineOptOut = new();
+
+    public TrackMode SkillMode  { get; private set; } = TrackMode.IncludeOnly;
+    public TrackMode DebuffMode { get; private set; } = TrackMode.IncludeOnly;
+    public TrackMode BuffMode   { get; private set; } = TrackMode.IncludeOnly;
+
+    public void SetSkillMode(TrackMode m)  => SkillMode  = m;
+    public void SetDebuffMode(TrackMode m) => DebuffMode = m;
+    public void SetBuffMode(TrackMode m)   => BuffMode   = m;
 
     /// <summary>Returns true when the skill cooldown with <paramref name="skillId"/> is in the tracked set.</summary>
     public bool IsCooldownTracked(int skillId) => _skills.Contains(skillId);
@@ -22,10 +40,19 @@ internal sealed class CooldownBarSelection
     /// <summary>Returns true when the debuff with <paramref name="baseId"/> is in the tracked set.</summary>
     public bool IsDebuffTracked(int baseId) => _debuffs.Contains(baseId);
 
+    /// <summary>Returns true when the buff with <paramref name="baseId"/> is in the tracked set.</summary>
+    public bool IsBuffTracked(int baseId) => _buffs.Contains(baseId);
+
     /// <summary>Adds or removes <paramref name="skillId"/> from the tracked-cooldowns set.</summary>
     public void SetCooldown(int skillId, bool on)
     {
         if (on) _skills.Add(skillId); else _skills.Remove(skillId);
+    }
+
+    /// <summary>Adds or removes <paramref name="baseId"/> from the tracked-buffs set.</summary>
+    public void SetBuff(int baseId, bool on)
+    {
+        if (on) _buffs.Add(baseId); else _buffs.Remove(baseId);
     }
 
     /// <summary>
@@ -52,18 +79,26 @@ internal sealed class CooldownBarSelection
     public static CooldownBarSelection Load(IConfigSection cfg)
     {
         var sel = new CooldownBarSelection();
-        foreach (var id in cfg.Get("track.skills",         Array.Empty<int>()) ?? Array.Empty<int>()) sel._skills.Add(id);
-        foreach (var id in cfg.Get("track.debuffs",        Array.Empty<int>()) ?? Array.Empty<int>()) sel._debuffs.Add(id);
-        foreach (var id in cfg.Get("track.imagineOptOut",  Array.Empty<int>()) ?? Array.Empty<int>()) sel._imagineOptOut.Add(id);
+        foreach (var id in cfg.Get("track.skills",        Array.Empty<int>()) ?? Array.Empty<int>()) sel._skills.Add(id);
+        foreach (var id in cfg.Get("track.debuffs",       Array.Empty<int>()) ?? Array.Empty<int>()) sel._debuffs.Add(id);
+        foreach (var id in cfg.Get("track.buffs",         Array.Empty<int>()) ?? Array.Empty<int>()) sel._buffs.Add(id);
+        foreach (var id in cfg.Get("track.imagineOptOut", Array.Empty<int>()) ?? Array.Empty<int>()) sel._imagineOptOut.Add(id);
+        sel.SkillMode  = (TrackMode)cfg.Get("mode.skills",  0);
+        sel.DebuffMode = (TrackMode)cfg.Get("mode.debuffs", 0);
+        sel.BuffMode   = (TrackMode)cfg.Get("mode.buffs",   0);
         return sel;
     }
 
     /// <summary>Persists all three sets to <paramref name="cfg"/> and calls <see cref="IConfigSection.Save"/>.</summary>
     public void Save(IConfigSection cfg)
     {
-        cfg.Set("track.skills",         _skills.ToArray());
-        cfg.Set("track.debuffs",        _debuffs.ToArray());
-        cfg.Set("track.imagineOptOut",  _imagineOptOut.ToArray());
+        cfg.Set("track.skills",        _skills.ToArray());
+        cfg.Set("track.debuffs",       _debuffs.ToArray());
+        cfg.Set("track.buffs",         _buffs.ToArray());
+        cfg.Set("track.imagineOptOut", _imagineOptOut.ToArray());
+        cfg.Set("mode.skills",  (int)SkillMode);
+        cfg.Set("mode.debuffs", (int)DebuffMode);
+        cfg.Set("mode.buffs",   (int)BuffMode);
         cfg.Save();
     }
 }

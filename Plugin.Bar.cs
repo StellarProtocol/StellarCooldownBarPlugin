@@ -14,24 +14,21 @@ public sealed partial class Plugin
 {
     private static readonly ColorRgba CooldownCol = new(0.35f, 0.78f, 1.00f, 1f);   // cyan
     private static readonly ColorRgba DebuffCol   = new(1.00f, 0.35f, 0.35f, 1f);   // red
+    private static readonly ColorRgba BuffCol     = new(0.35f, 1.00f, 0.50f, 1f);   // green
     private static readonly ColorRgba MutedCol    = new(1.00f, 1.00f, 1.00f, 1f);   // white (borderless over world; relies on Shadow)
 
     // Per-slot UV stash — Load* returns the sub-rect via out param; the tile's Uv Func reads it.
     private readonly UvRect[] _uv = new UvRect[MaxTiles];
 
-    // Persistent panel (StatInspector mini-HUD pattern): a header strip with a title + a gear button that opens
-    // the picker (so settings are reachable without the F8 hotkey), a divider, then the active-only tile strip
-    // (or a "pick what to track" hint when idle). Always visible → discoverable + movable in layout edit-mode.
+    private const int MaxTilesPerRow = MaxTiles / MaxRows;
+
     private HudElement BuildRoot()
     {
-        // Gear icon (the SAME settings-gear.png StatInspector uses) in a fixed cell — a ⚙ glyph has no in-game
-        // font coverage, but the PNG renders reliably. SelectableElement force-expands its child, so the CellElement
-        // pins the 15px icon's width (else it streaks). Click toggles the picker (no F8 needed).
         var gear = new CellElement(
             new SelectableElement(
                 new ImageElement(() => GearPng(), 15, 15),
                 OnClick: () => _settings.SetVisible(!_settings.IsShown)),
-            Width: 26f);   // matches StatInspector mini-HUD gear cell exactly
+            Width: 26f);
         var header = new RowElement(new HudElement[]
         {
             new TextElement(() => "Cooldowns", () => MutedCol, Shadow: true),
@@ -39,38 +36,114 @@ public sealed partial class Plugin
             gear,
         });
 
-        var slots = new HudElement[MaxTiles];
-        for (int i = 0; i < MaxTiles; i++)
+        // Row 1: columns 0..MaxTilesPerRow-1 → tiles 0.._tilesPerRow-1
+        var row1 = new HudElement[MaxTilesPerRow + 1];   // +1 for +N overflow label
+        for (int i = 0; i < MaxTilesPerRow; i++)
         {
-            int idx = i;   // capture per-slot index
-            slots[i] = new ConditionalElement(
-                () => idx < _tileCount,
+            int c = i;
+            row1[i] = new ConditionalElement(
+                () => c < _tilesPerRow && c < _tileCount,
                 new CooldownTileElement(
-                    Icon:        () => TileIcon(idx),
-                    Uv:          () => _uv[idx],
-                    Fill01:      () => idx < _tileCount ? _tiles[idx].Fill01 : 0f,
-                    Seconds:     () => SecondsLabel(idx),
-                    Accent:      () => AccentColor(idx),
-                    IsImagine:   () => idx < _tileCount && _tiles[idx].IsImagine,
-                    ChargeCount: () => idx < _tileCount ? _tiles[idx].ChargeCount : 0));
+                    Icon:        () => TileIcon(c),
+                    Uv:          () => _uv[c],
+                    Fill01:      () => c < _tileCount ? _tiles[c].Fill01 : 0f,
+                    Seconds:     () => SecondsLabel(c),
+                    Accent:      () => AccentColor(c),
+                    IsImagine:   () => false,
+                    ChargeCount: () => c < _tileCount ? _tiles[c].ChargeCount : 0)
+                { OnClick = () => OnTileClick(c) });
         }
-        var body = new ConditionalElement(
-            () => _tileCount > 0,
-            new RowElement(slots, Gap: 6f),
+        row1[MaxTilesPerRow] = new ConditionalElement(
+            () => _rowsVisible < 2 && _totalTileCount > _tileCount,
+            new TextElement(() => $"+{_totalTileCount - _tileCount}", () => MutedCol, Shadow: true));
+
+        // Row 2: columns 0..MaxTilesPerRow-1 → tiles _tilesPerRow.._tilesPerRow+col
+        var row2 = new HudElement[MaxTilesPerRow + 1];
+        for (int i = 0; i < MaxTilesPerRow; i++)
+        {
+            int c = i;
+            row2[i] = new ConditionalElement(
+                () => c < _tilesPerRow && _tilesPerRow + c < _tileCount,
+                new CooldownTileElement(
+                    Icon:        () => TileIcon(_tilesPerRow + c),
+                    Uv:          () => _uv[_tilesPerRow + c],
+                    Fill01:      () => { int ti = _tilesPerRow + c; return ti < _tileCount ? _tiles[ti].Fill01 : 0f; },
+                    Seconds:     () => SecondsLabel(_tilesPerRow + c),
+                    Accent:      () => AccentColor(_tilesPerRow + c),
+                    IsImagine:   () => false,
+                    ChargeCount: () => { int ti = _tilesPerRow + c; return ti < _tileCount ? _tiles[ti].ChargeCount : 0; })
+                { OnClick = () => OnTileClick(_tilesPerRow + c) });
+        }
+        row2[MaxTilesPerRow] = new ConditionalElement(
+            () => _rowsVisible == 2 && _totalTileCount > _tileCount,
+            new TextElement(() => $"+{_totalTileCount - _tileCount}", () => MutedCol, Shadow: true));
+
+        // Row 3: columns 0..MaxTilesPerRow-1 → tiles 2*_tilesPerRow..2*_tilesPerRow+col
+        var row3 = new HudElement[MaxTilesPerRow + 1];
+        for (int i = 0; i < MaxTilesPerRow; i++)
+        {
+            int c = i;
+            row3[i] = new ConditionalElement(
+                () => c < _tilesPerRow && _tilesPerRow * 2 + c < _tileCount,
+                new CooldownTileElement(
+                    Icon:        () => TileIcon(_tilesPerRow * 2 + c),
+                    Uv:          () => _uv[_tilesPerRow * 2 + c],
+                    Fill01:      () => { int ti = _tilesPerRow * 2 + c; return ti < _tileCount ? _tiles[ti].Fill01 : 0f; },
+                    Seconds:     () => SecondsLabel(_tilesPerRow * 2 + c),
+                    Accent:      () => AccentColor(_tilesPerRow * 2 + c),
+                    IsImagine:   () => false,
+                    ChargeCount: () => { int ti = _tilesPerRow * 2 + c; return ti < _tileCount ? _tiles[ti].ChargeCount : 0; })
+                { OnClick = () => OnTileClick(_tilesPerRow * 2 + c) });
+        }
+        row3[MaxTilesPerRow] = new ConditionalElement(
+            () => _rowsVisible >= 3 && _totalTileCount > _tileCount,
+            new TextElement(() => $"+{_totalTileCount - _tileCount}", () => MutedCol, Shadow: true));
+
+        var hint = new ConditionalElement(
+            () => _tileCount == 0,
             new TextElement(() => "No active cooldowns — click the gear (top-right) to pick what to show", () => MutedCol, Shadow: true));
 
-        return new ColumnElement(new HudElement[] { header, new SeparatorElement(), body }, Gap: 2f);
+        var tileRows = new ColumnElement(new HudElement[]
+        {
+            new RowElement(row1, Gap: 6f),
+            new ConditionalElement(() => _rowsVisible >= 2 && _tileCount > _tilesPerRow,
+                new RowElement(row2, Gap: 6f)),
+            new ConditionalElement(() => _rowsVisible >= 3 && _tileCount > _tilesPerRow * 2,
+                new RowElement(row3, Gap: 6f)),
+        }, Gap: 6f);
+
+        return new ColumnElement(new HudElement[]
+        {
+            header,
+            new SeparatorElement(),
+            hint,
+            tileRows,
+        }, Gap: 2f);
     }
 
     private ColorRgba AccentColor(int idx)
-        => idx < _tileCount && _tiles[idx].Kind == TileKind.Debuff ? DebuffCol : CooldownCol;
+    {
+        if (idx >= _tileCount) return CooldownCol;
+        return _tiles[idx].Kind switch
+        {
+            TileKind.Debuff => DebuffCol,
+            TileKind.Buff   => BuffCol,
+            _               => CooldownCol,
+        };
+    }
 
     private object? TileIcon(int idx)
     {
         if (idx >= _tileCount) { _uv[idx] = new UvRect(0f, 0f, 1f, 1f); return null; }
         var t = _tiles[idx];
-        if (t.IsImagine)                 return _services.GameAssets.LoadImagineIcon(t.IconSkillId, out _uv[idx]);
-        if (t.Kind == TileKind.Cooldown) return _services.GameAssets.LoadSkillIcon(t.Id, out _uv[idx]);
+        if (t.Kind == TileKind.Cooldown)
+            return _services.GameAssets.LoadImagineIcon(t.IconSkillId, out _uv[idx])
+                ?? _services.GameAssets.LoadSkillIcon(t.Id, out _uv[idx]);
+        // Buff/debuff: show the source skill's icon when known, fall back to the buff/debuff icon.
+        if (t.IconSkillId > 0)
+            return _services.GameAssets.LoadImagineIcon(t.IconSkillId, out _uv[idx])
+                ?? _services.GameAssets.LoadSkillIcon(t.IconSkillId, out _uv[idx])
+                ?? _services.GameAssets.LoadBuffIcon(t.Id, out _uv[idx]);
         return _services.GameAssets.LoadBuffIcon(t.Id, out _uv[idx]);
     }
 
@@ -78,10 +151,11 @@ public sealed partial class Plugin
     {
         if (idx >= _tileCount) return "";
         var t = _tiles[idx];
+        if (t.RemainingMs < 0) return "∞";   // permanent — no expiry
         float secs = t.RemainingMs / 1000f;
-        string s = secs >= 10f ? $"{(int)secs}s" : $"{secs:F1}s";
-        if (t.Fallback) s = "*" + s;
-        return s;
+        string time = secs >= 10f ? $"{(int)secs}s" : $"{secs:F1}s";
+        if (t.Fallback) time = "*" + time;
+        return time;
     }
 
     // Embedded settings-gear PNG bytes (cached). Same resource StatInspector ships; the ⚙ glyph has no in-game
