@@ -86,9 +86,26 @@ public sealed partial class Plugin : IStellarPlugin
         _bar.Remove();
     }
 
+    private float _rebuildAccum;
+    private const float RebuildIntervalS = 1f / 60f;   // cap buff/CD data refresh at 60Hz (smooth; still caps on high-fps setups)
+
     private void OnUpdate(float deltaTime)
     {
-        RebuildSnapshot();        // Plugin.Seen.cs — the window auto-refreshes its Funcs on the framework tick
+        // Only read buff/CD state when the bar is actually visible, and at ~20Hz — not every frame.
+        // RefreshActiveBuffs rebuilds collections + walks the buff lists via reflection; running it every
+        // frame (even while the bar is hidden) was a steady combat-time GC source. The window's Funcs still
+        // draw every frame from the last-built _tiles, so the bar stays smooth; only the data refresh throttles.
+        if (_bar.IsShown)
+        {
+            _rebuildAccum += deltaTime;
+            if (_rebuildAccum >= RebuildIntervalS)
+            {
+                _rebuildAccum = 0f;
+                BuffTrackPatch.MarkDemand();   // keep the per-entity buff/CD postfixes awake only while refreshing
+                SkillCDPatch.MarkDemand();
+                RebuildSnapshot();             // Plugin.Seen.cs
+            }
+        }
         TickTooltipPlace();       // Plugin.Tooltip.cs — re-assert cursor rect after destroy-on-hide remount
         LogSnapshotDiag(deltaTime);   // Plugin.Diagnostics.cs — gated on STELLAR_DIAGNOSTICS
     }

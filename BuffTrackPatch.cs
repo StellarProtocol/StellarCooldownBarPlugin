@@ -37,6 +37,25 @@ internal static partial class BuffTrackPatch
     private static Harmony?        _harmony;
     private static Action<string>? _log;
 
+    // ── Demand gate ──
+    // The postfixes fire for EVERY entity's buff add/sync and box longs via reflection before the local-player
+    // check. Skip them entirely (one comparison, zero alloc) unless the bar is actively refreshing. The plugin's
+    // OnUpdate calls MarkDemand() on each throttled refresh while the bar is shown.
+    private const  long DemandWindowMs = 500;
+    private static long _lastDemandTick;
+    private static bool Active => _lastDemandTick != 0 && Environment.TickCount64 - _lastDemandTick < DemandWindowMs;
+    internal static void MarkDemand() => _lastDemandTick = Environment.TickCount64;
+
+    // Reused across RefreshActiveBuffs calls so the ~20Hz refresh doesn't churn a fresh HashSet+List each time.
+    private static readonly HashSet<int> _live  = new();
+    private static readonly List<int>    _stale = new();
+    // Reused arg array for IterList's indexer GetValue (avoids a new object[1] per buff item per refresh).
+    private static readonly object[] _idxArg = new object[1];
+
+    // Player uuid is stable within a session; cache it to avoid a reflection Invoke + boxed long per buff event.
+    private static long _cachedPlayerUuid;
+    private static long _playerUuidTick;
+
     private static object? _localBuffComp;
     private static object? _localClientBuffComp;
 
@@ -153,12 +172,14 @@ internal static partial class BuffTrackPatch
         _skillTableResolved = false;
         _skillTableInst = null; _miGetSkillRow = null; _piSkillRowName = null;
         _loggedError = _diagLogged = false;
+        _lastDemandTick = 0; _cachedPlayerUuid = 0; _playerUuidTick = 0;
+        _live.Clear(); _stale.Clear();
     }
 
     internal static void RefreshActiveBuffs()
     {
         if (!_diagLogged) { _diagLogged = true; _log?.Invoke($"[Buff] Refresh: buffComp={_localBuffComp != null} clientComp={_localClientBuffComp != null}"); }
-        var live = new HashSet<int>();
+        var live = _live; live.Clear();
 
         if (_localBuffComp != null)
         {
@@ -216,7 +237,7 @@ internal static partial class BuffTrackPatch
             }
         }
 
-        var stale = new List<int>();
+        var stale = _stale; stale.Clear();
         foreach (var kv in _activeBuffs)
             if (!live.Contains(kv.Key)) stale.Add(kv.Key);
         foreach (var k in stale) { _activeBuffs.Remove(k); _buffSourceSkillId.Remove(k); }
@@ -275,6 +296,7 @@ internal static partial class BuffTrackPatch
 
     private static void PostfixOnAddBuff(object __instance, object __0, bool __1)
     {
+        if (!Active) return;
         try
         {
             if (!IsLocalPlayer(GetHostEntityUuid(__instance))) return;
@@ -322,6 +344,7 @@ internal static partial class BuffTrackPatch
 
     private static void PostfixClientAddBuff(object __instance, object __0, int __1, int __2, float __3, object __result)
     {
+        if (!Active) return;
         try
         {
             if (!IsLocalPlayer(GetHostEntityUuid(__instance))) return;
@@ -343,14 +366,21 @@ internal static partial class BuffTrackPatch
         var cnt = (int)(t.GetProperty("Count")?.GetValue(list) ?? 0);
         var idx = t.GetProperty("Item");
         for (int i = 0; i < cnt; i++)
-            yield return idx?.GetValue(list, new object[] { i });
+        {
+            _idxArg[0] = i;                       // reused arg array — no per-item object[] alloc
+            yield return idx?.GetValue(list, _idxArg);
+        }
     }
 
     private static long GetPlayerUuid()
     {
+        long now = Environment.TickCount64;
+        if (_cachedPlayerUuid != 0 && now - _playerUuidTick < 2000) return _cachedPlayerUuid;
         if (!_entityMgrResolved) ResolveEntityMgr();
         if (_entityMgrInst == null || _miGetPlayerUuid == null) return 0L;
-        return (long)_miGetPlayerUuid.Invoke(_entityMgrInst, null)!;
+        _cachedPlayerUuid = (long)_miGetPlayerUuid.Invoke(_entityMgrInst, null)!;
+        _playerUuidTick   = now;
+        return _cachedPlayerUuid;
     }
 
     private static bool IsLocalPlayer(long hostUuid)
