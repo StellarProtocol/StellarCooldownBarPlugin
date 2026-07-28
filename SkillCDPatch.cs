@@ -25,6 +25,17 @@ internal static class SkillCDPatch
     private static Harmony?        _harmony;
     private static Action<string>? _log;
 
+    // Demand gate — matches BuffTrackPatch. The OnCDBegin/OnSkillCDLayerChanged postfixes and the per-frame
+    // GetRemainSec query only matter while the bar is refreshing; skip the postfixes otherwise. The plugin's
+    // OnUpdate calls MarkDemand() each throttled refresh while the bar is shown.
+    private const  long DemandWindowMs = 500;
+    private static long _lastDemandTick;
+    private static bool Active => _lastDemandTick != 0 && Environment.TickCount64 - _lastDemandTick < DemandWindowMs;
+    internal static void MarkDemand() => _lastDemandTick = Environment.TickCount64;
+
+    // Reused arg array for the per-CD ZBattleUtils.TryGetCDData query (avoids a new object?[2] per active CD per refresh).
+    private static readonly object?[] _cdArgs = new object?[2];
+
     private static MethodInfo?   _miGetSkillId;
     private static PropertyInfo? _piDuration;
     private static PropertyInfo? _piCdKey;
@@ -98,6 +109,7 @@ internal static class SkillCDPatch
         _piCdRealLen      = null;
         _liveQueryReady   = false;
         _loggedError      = false;
+        _lastDemandTick   = 0;
     }
 
     internal static float GetRemainSec(SkillCdEntry entry)
@@ -106,7 +118,7 @@ internal static class SkillCDPatch
         if (_miTryGetCDData == null || string.IsNullOrEmpty(entry.CdKey)) return -1f;
         try
         {
-            var args = new object?[] { entry.CdKey, null };
+            var args = _cdArgs; args[0] = entry.CdKey; args[1] = null;   // reused arg array
             if (!(bool)_miTryGetCDData.Invoke(null, args)! || args[1] == null) return -1f;
 
             var   cd      = args[1];
@@ -127,6 +139,7 @@ internal static class SkillCDPatch
 
     private static void PostfixOnCDBegin(object __instance, object __0)
     {
+        if (!Active) return;
         try
         {
             _miGetSkillId ??= __instance.GetType().GetMethod("get_SkillId", BindingFlags.Public | BindingFlags.Instance);
@@ -165,6 +178,7 @@ internal static class SkillCDPatch
 
     private static void PostfixOnSkillCDLayerChanged(object __instance, object __0)
     {
+        if (!Active) return;
         try
         {
             _miGetSkillId ??= __instance.GetType().GetMethod("get_SkillId", BindingFlags.Public | BindingFlags.Instance);
