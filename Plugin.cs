@@ -91,7 +91,7 @@ public sealed partial class Plugin : IStellarPlugin
 
     private void OnUpdate(float deltaTime)
     {
-        // Only read buff/CD state when the bar is actually visible, and at ~20Hz — not every frame.
+        // Only read buff/CD state when the bar is actually visible, and at ~60Hz — not every frame.
         // RefreshActiveBuffs rebuilds collections + walks the buff lists via reflection; running it every
         // frame (even while the bar is hidden) was a steady combat-time GC source. The window's Funcs still
         // draw every frame from the last-built _tiles, so the bar stays smooth; only the data refresh throttles.

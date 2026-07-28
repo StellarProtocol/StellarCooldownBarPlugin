@@ -46,7 +46,7 @@ internal static partial class BuffTrackPatch
     private static bool Active => _lastDemandTick != 0 && Environment.TickCount64 - _lastDemandTick < DemandWindowMs;
     internal static void MarkDemand() => _lastDemandTick = Environment.TickCount64;
 
-    // Reused across RefreshActiveBuffs calls so the ~20Hz refresh doesn't churn a fresh HashSet+List each time.
+    // Reused across RefreshActiveBuffs calls so the ~60Hz refresh doesn't churn a fresh HashSet+List each time.
     private static readonly HashSet<int> _live  = new();
     private static readonly List<int>    _stale = new();
     // Reused arg array for IterList's indexer GetValue (avoids a new object[1] per buff item per refresh).
