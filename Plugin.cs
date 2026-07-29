@@ -56,8 +56,11 @@ public sealed partial class Plugin : IStellarPlugin
                 DefaultRect: new WindowRect(897f, 940f, 320f, 130f),
                 Category:    WindowCategory.HUD,
                 Style:       WindowPanelStyle.Borderless)
-            { StartVisible = true, HideUntilInWorld = true, Draggable = true,
-              EditModeDragOnly = true, AutoHideBehindGameMenus = true,
+            { StartVisible = true, Draggable = true,
+              EditModeDragOnly = true,
+              // In-world HUD: draw only in the World phase, and hide while the game HUD is hidden (cutscene/menu cover).
+              ShouldRender = () => _services.ClientState.Phase == GamePhase.World
+                                   && (_services.ClientState.UiState & GameUIState.GameHudHidden) == 0,
               Resizable = true, MinWidth = 150f, MaxWidth = 1600f, MinHeight = 130f, MaxHeight = 270f,
               BackgroundOpacity = () => _bgOpacity },
             BuildRoot()));
