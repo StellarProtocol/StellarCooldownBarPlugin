@@ -26,8 +26,9 @@ public sealed partial class Plugin
                 Category:    WindowCategory.Tools,
                 Style:       WindowPanelStyle.GlassMenu)
             { StartVisible = false, Closable = true, Draggable = true,
-              // Gameplay tool: draw only while in-world.
-              ShouldRender = () => _services.ClientState.Phase == GamePhase.World },
+              // Gameplay tool: draw only while in-world, and hide during loading screens.
+              ShouldRender = () => _services.ClientState.Phase == GamePhase.World
+                                   && (_services.ClientState.UiState & GameUIState.Loading) == 0 },
             BuildSettingsRoot(),
             OnClose: () => _settings.SetVisible(false)));
 

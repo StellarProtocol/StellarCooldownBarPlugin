@@ -32,8 +32,9 @@ public sealed partial class Plugin
                 Category:    WindowCategory.HUD,
                 Style:       WindowPanelStyle.Borderless)
             { StartVisible = false, DismissOnOutsideClick = true,
-              // Transient tooltip for the in-world bar/settings: draw only while in-world.
-              ShouldRender = () => _services.ClientState.Phase == GamePhase.World },
+              // Transient tooltip for the in-world bar/settings: draw only while in-world, and hide during loading screens.
+              ShouldRender = () => _services.ClientState.Phase == GamePhase.World
+                                   && (_services.ClientState.UiState & GameUIState.Loading) == 0 },
             new PanelElement(
                 new ColumnElement(new HudElement[]
                 {
