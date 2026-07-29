@@ -58,9 +58,10 @@ public sealed partial class Plugin : IStellarPlugin
                 Style:       WindowPanelStyle.Borderless)
             { StartVisible = true, Draggable = true,
               EditModeDragOnly = true,
-              // In-world HUD: draw only in the World phase, and hide while the game HUD is hidden (cutscene/menu cover).
+              // In-world HUD: draw only in the World phase, and hide behind blocking overlays (old AutoHideBehindGameMenus)
+              // and the line-selector / any menu.
               ShouldRender = () => _services.ClientState.Phase == GamePhase.World
-                                   && (_services.ClientState.UiState & GameUIState.GameHudHidden) == 0,
+                                   && (_services.ClientState.UiState & (GameUIState.Blocking | GameUIState.AnyMenu)) == 0,
               Resizable = true, MinWidth = 150f, MaxWidth = 1600f, MinHeight = 130f, MaxHeight = 270f,
               BackgroundOpacity = () => _bgOpacity },
             BuildRoot()));
