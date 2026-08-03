@@ -15,8 +15,6 @@ public sealed partial class Plugin : IStellarPlugin
 {
     public string Name => "CooldownBar";
 
-    private const string HarmonyId = "stellar.cooldownbar";
-
     private readonly IPluginServices _services;
     private readonly IConfigSection _cfg;
     private readonly CooldownBarSelection _selection;
@@ -44,8 +42,8 @@ public sealed partial class Plugin : IStellarPlugin
             buffSkillId:    id => _services.GameData.Combat.GetBuff(id)?.SkillId ?? 0,
             isImagineSkill: sk => _services.ResonanceData.GetImagineForSkill(sk) is not null);
         _tiles = new TrackedTile[MaxTiles];
-        SkillCDPatch.Install(HarmonyId, _services.Log.Info);
-        BuffTrackPatch.Install(HarmonyId, _services.Log.Info);
+        SkillCDPatch.Install(_services.Harmony.Create("skillcd"), _services.Log.Info);
+        BuffTrackPatch.Install(_services.Harmony.Create("buff"), _services.Log.Info);
 
         // Borderless window (chrome-less, HUD-like) via WindowBuilder — the icon-capable render path
         // (the HUD builder has no GameTextureElement support). Mirrors CombatMeter's overlay.

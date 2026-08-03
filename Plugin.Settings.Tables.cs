@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using Stellar.Abstractions.Domain;
+using Stellar.Abstractions.Services;
 
 namespace Stellar.CooldownBar;
 
@@ -73,7 +74,7 @@ public sealed partial class Plugin
     {
         try
         {
-            var t = SkillCDPatch.FindType("Bokura.SkillTableBase") ?? SkillCDPatch.FindType("SkillTableBase");
+            var t = StellarInterop.FindType("Bokura.SkillTableBase") ?? StellarInterop.FindType("SkillTableBase");
             if (t == null) { _services.Log.Warning("[Settings] SkillTableBase not found"); return; }
 
             MethodInfo? miGet = null;
@@ -134,7 +135,7 @@ public sealed partial class Plugin
     {
         try
         {
-            var t = SkillCDPatch.FindType("Bokura.BuffTableBase") ?? SkillCDPatch.FindType("BuffTableBase");
+            var t = StellarInterop.FindType("Bokura.BuffTableBase") ?? StellarInterop.FindType("BuffTableBase");
             if (t == null) { _services.Log.Warning("[Settings] BuffTableBase not found"); return; }
 
             MethodInfo? miGet = null;

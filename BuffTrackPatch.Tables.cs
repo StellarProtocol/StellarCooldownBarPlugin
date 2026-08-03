@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using Stellar.Abstractions.Services;
 
 namespace Stellar.CooldownBar;
 
@@ -44,7 +45,7 @@ internal static partial class BuffTrackPatch
     private static void ResolveBuffTable()
     {
         _tableReflResolved = true;
-        var t = SkillCDPatch.FindType("Bokura.BuffTableBase") ?? SkillCDPatch.FindType("BuffTableBase");
+        var t = StellarInterop.FindType("Bokura.BuffTableBase") ?? StellarInterop.FindType("BuffTableBase");
         if (t == null) return;
         foreach (var m in t.GetMethods(BindingFlags.Public | BindingFlags.Static))
         {
@@ -82,7 +83,7 @@ internal static partial class BuffTrackPatch
     private static void ResolveSkillTable()
     {
         _skillTableResolved = true;
-        var t = SkillCDPatch.FindType("Bokura.SkillTableBase") ?? SkillCDPatch.FindType("SkillTableBase");
+        var t = StellarInterop.FindType("Bokura.SkillTableBase") ?? StellarInterop.FindType("SkillTableBase");
         if (t == null) return;
         foreach (var m in t.GetMethods(BindingFlags.Public | BindingFlags.Static))
         {
