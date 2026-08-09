@@ -31,7 +31,10 @@ public sealed partial class Plugin
                 DefaultRect: new WindowRect(897f, 830f, 380f, 130f),
                 Category:    WindowCategory.HUD,
                 Style:       WindowPanelStyle.Borderless)
-            { StartVisible = false, HideUntilInWorld = true, DismissOnOutsideClick = true },
+            { StartVisible = false, DismissOnOutsideClick = true,
+              // Transient tooltip for the in-world bar/settings: draw only while in-world, and hide during loading screens.
+              ShouldRender = () => _services.ClientState.Phase == GamePhase.World
+                                   && (_services.ClientState.UiState & GameUIState.Loading) == 0 },
             new PanelElement(
                 new ColumnElement(new HudElement[]
                 {

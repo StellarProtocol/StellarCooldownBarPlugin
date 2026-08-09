@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using Stellar.Abstractions.Services;
 
 namespace Stellar.CooldownBar;
 
@@ -34,7 +35,6 @@ internal static partial class BuffTrackPatch
     public static IReadOnlyDictionary<int, BuffTrackEntry> ActiveBuffs => _activeBuffs;
 
     private static readonly Dictionary<int, BuffTrackEntry> _activeBuffs = new();
-    private static Harmony?        _harmony;
     private static Action<string>? _log;
 
     // ── Demand gate ──
@@ -49,8 +49,6 @@ internal static partial class BuffTrackPatch
     // Reused across RefreshActiveBuffs calls so the ~60Hz refresh doesn't churn a fresh HashSet+List each time.
     private static readonly HashSet<int> _live  = new();
     private static readonly List<int>    _stale = new();
-    // Reused arg array for IterList's indexer GetValue (avoids a new object[1] per buff item per refresh).
-    private static readonly object[] _idxArg = new object[1];
 
     // Player uuid is stable within a session; cache it to avoid a reflection Invoke + boxed long per buff event.
     private static long _cachedPlayerUuid;
@@ -98,50 +96,51 @@ internal static partial class BuffTrackPatch
     private static bool _loggedError;
     private static bool _diagLogged;
 
-    internal static bool Install(string harmonyId, Action<string> log)
+    internal static bool Install(Harmony harmony, Action<string> log)
     {
-        _log     = log;
-        _harmony = new Harmony(harmonyId + ".buff");
+        _log = log;
 
-        var buffCompType = SkillCDPatch.FindType("Panda.ZGame.BuffComp");
+        var buffCompType = StellarInterop.FindType("Panda.ZGame.BuffComp");
         if (buffCompType == null)
         {
             log("[Buff] BuffComp not found — patch skipped");
             return false;
         }
 
-        bool patchedAdd = false;
-        foreach (var m in buffCompType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+        // OnAddBuff is mandatory; resolve it FIRST and bail before patching anything if absent, so we never
+        // leave a partial patch installed (the framework owns the Harmony instance — no manual UnpatchSelf).
+        var mAdd = StellarInterop.FindMethod(buffCompType, "OnAddBuff", 2);
+        if (mAdd == null) { log("[Buff] OnAddBuff not found — patch skipped"); return false; }
+        try
         {
-            var ps = m.GetParameters();
-            if ((m.Name == "OnAddBuff" || m.Name == "OnBuffSync") && ps.Length == 2)
+            harmony.Patch(mAdd, postfix: new HarmonyMethod(typeof(BuffTrackPatch), nameof(PostfixOnAddBuff)));
+            log("[Buff] OnAddBuff patched");
+        }
+        catch (Exception ex) { log($"[Buff] OnAddBuff patch failed: {ex.Message}"); return false; }
+
+        var mSync = StellarInterop.FindMethod(buffCompType, "OnBuffSync", 2);
+        if (mSync != null)
+        {
+            try
+            {
+                harmony.Patch(mSync, postfix: new HarmonyMethod(typeof(BuffTrackPatch), nameof(PostfixOnAddBuff)));
+                log("[Buff] OnBuffSync patched");
+            }
+            catch (Exception ex) { log($"[Buff] OnBuffSync patch failed: {ex.Message}"); }
+        }
+
+        var clientCompType = StellarInterop.FindType("Panda.ZGame.ClientBuffComp");
+        if (clientCompType != null)
+        {
+            var mClientAdd = StellarInterop.FindMethod(clientCompType, "AddBuff", 4);
+            if (mClientAdd != null)
             {
                 try
                 {
-                    _harmony.Patch(m, postfix: new HarmonyMethod(typeof(BuffTrackPatch), nameof(PostfixOnAddBuff)));
-                    if (m.Name == "OnAddBuff") { log("[Buff] OnAddBuff patched"); patchedAdd = true; }
-                    else log("[Buff] OnBuffSync patched");
+                    harmony.Patch(mClientAdd, postfix: new HarmonyMethod(typeof(BuffTrackPatch), nameof(PostfixClientAddBuff)));
+                    log("[Buff] ClientBuffComp.AddBuff postfix patched");
                 }
-                catch (Exception ex) { log($"[Buff] {m.Name} patch failed: {ex.Message}"); }
-            }
-        }
-        if (!patchedAdd) { _harmony.UnpatchSelf(); _harmony = null; return false; }
-
-        var clientCompType = SkillCDPatch.FindType("Panda.ZGame.ClientBuffComp");
-        if (clientCompType != null)
-        {
-            foreach (var m in clientCompType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
-            {
-                if (m.Name == "AddBuff" && m.GetParameters().Length == 4)
-                {
-                    try
-                    {
-                        _harmony.Patch(m, postfix: new HarmonyMethod(typeof(BuffTrackPatch), nameof(PostfixClientAddBuff)));
-                        log("[Buff] ClientBuffComp.AddBuff postfix patched");
-                    }
-                    catch (Exception ex) { log($"[Buff] ClientBuffComp.AddBuff patch failed: {ex.Message}"); }
-                    break;
-                }
+                catch (Exception ex) { log($"[Buff] ClientBuffComp.AddBuff patch failed: {ex.Message}"); }
             }
         }
         return true;
@@ -149,9 +148,9 @@ internal static partial class BuffTrackPatch
 
     internal static void Uninstall()
     {
+        // Harmony teardown is owned by IHarmonyHost, which auto-unpatches every instance on plugin dispose —
+        // do NOT unpatch here (that would double-unpatch). Only reset our own transient reflection state.
         _activeBuffs.Clear();
-        _harmony?.UnpatchSelf();
-        _harmony = null;
         _localBuffComp = _localClientBuffComp = null;
         _piShowedBuffList = null; _showedListResolved = false;
         _piBuffItemUuid = _piBuffItemBaseId = _piBuffItemLayer = _piBuffItemLevel = _piBuffItemDuration = null;
@@ -360,17 +359,8 @@ internal static partial class BuffTrackPatch
         _log?.Invoke($"[Buff] {src}: {ex.InnerException?.Message ?? ex.Message}");
     }
 
-    private static IEnumerable<object?> IterList(object list)
-    {
-        var t   = list.GetType();
-        var cnt = (int)(t.GetProperty("Count")?.GetValue(list) ?? 0);
-        var idx = t.GetProperty("Item");
-        for (int i = 0; i < cnt; i++)
-        {
-            _idxArg[0] = i;                       // reused arg array — no per-item object[] alloc
-            yield return idx?.GetValue(list, _idxArg);
-        }
-    }
+    // Both buff lists are int-indexed ZLists (Count + Item[int]); the framework floor walks them.
+    private static IEnumerable<object?> IterList(object list) => StellarInterop.Enumerate(list);
 
     private static long GetPlayerUuid()
     {
@@ -391,17 +381,9 @@ internal static partial class BuffTrackPatch
 
     private static void ResolveEntityMgr()
     {
-        var t = SkillCDPatch.FindType("Panda.ZGame.ZEntityMgr");
+        var t = StellarInterop.FindType("Panda.ZGame.ZEntityMgr");
         if (t == null) { _entityMgrResolved = true; return; }
-        PropertyInfo? instProp = null;
-        var cur = t;
-        while (cur != null && instProp == null)
-        {
-            instProp = cur.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)
-                    ?? cur.GetProperty("Instance", BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.FlattenHierarchy);
-            cur = cur.BaseType;
-        }
-        _entityMgrInst   = instProp?.GetValue(null);
+        _entityMgrInst   = StellarInterop.GetSingleton(t);
         _miGetPlayerUuid = t.GetMethod("get_PlayerUuid", BindingFlags.Public | BindingFlags.Instance);
         if (_entityMgrInst != null) _entityMgrResolved = true;
     }

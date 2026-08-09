@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using Stellar.Abstractions.Services;
 
 namespace Stellar.CooldownBar;
 
@@ -22,7 +23,6 @@ internal static class SkillCDPatch
     public static IReadOnlyDictionary<int, SkillCdEntry> ActiveCDs => _activeCDs;
 
     private static readonly Dictionary<int, SkillCdEntry> _activeCDs = new();
-    private static Harmony?        _harmony;
     private static Action<string>? _log;
 
     // Demand gate — matches BuffTrackPatch. The OnCDBegin/OnSkillCDLayerChanged postfixes and the per-frame
@@ -51,54 +51,52 @@ internal static class SkillCDPatch
 
     private static bool _loggedError;
 
-    internal static bool Install(string harmonyId, Action<string> log)
+    internal static bool Install(Harmony harmony, Action<string> log)
     {
-        _log     = log;
-        _harmony = new Harmony(harmonyId + ".skillcd");
+        _log = log;
 
-        var scdType = FindType("Panda.ZGame.SkillControlData");
+        var scdType = StellarInterop.FindType("Panda.ZGame.SkillControlData");
         if (scdType == null)
         {
             log("[SkillCD] SkillControlData not found — patch skipped");
             return false;
         }
 
-        int patched = 0;
-        foreach (var m in scdType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
-        {
-            if (m.Name == "OnCDBegin" && m.GetParameters().Length == 1)
-            {
-                try
-                {
-                    _harmony.Patch(m, postfix: new HarmonyMethod(typeof(SkillCDPatch), nameof(PostfixOnCDBegin)));
-                    log("[SkillCD] OnCDBegin postfix patched");
-                    patched++;
-                }
-                catch (Exception ex) { log($"[SkillCD] OnCDBegin patch failed: {ex.Message}"); }
-            }
-            else if (m.Name == "OnSkillCDLayerChanged" && m.GetParameters().Length == 1)
-            {
-                try
-                {
-                    _harmony.Patch(m, postfix: new HarmonyMethod(typeof(SkillCDPatch), nameof(PostfixOnSkillCDLayerChanged)));
-                    log("[SkillCD] OnSkillCDLayerChanged postfix patched");
-                    patched++;
-                }
-                catch (Exception ex) { log($"[SkillCD] OnSkillCDLayerChanged patch failed: {ex.Message}"); }
-            }
+        var mBegin = StellarInterop.FindMethod(scdType, "OnCDBegin", 1);
+        var mLayer = StellarInterop.FindMethod(scdType, "OnSkillCDLayerChanged", 1);
 
-            if (patched == 2) break;
+        int patched = 0;
+        if (mBegin != null)
+        {
+            try
+            {
+                harmony.Patch(mBegin, postfix: new HarmonyMethod(typeof(SkillCDPatch), nameof(PostfixOnCDBegin)));
+                log("[SkillCD] OnCDBegin postfix patched");
+                patched++;
+            }
+            catch (Exception ex) { log($"[SkillCD] OnCDBegin patch failed: {ex.Message}"); }
+        }
+        if (mLayer != null)
+        {
+            try
+            {
+                harmony.Patch(mLayer, postfix: new HarmonyMethod(typeof(SkillCDPatch), nameof(PostfixOnSkillCDLayerChanged)));
+                log("[SkillCD] OnSkillCDLayerChanged postfix patched");
+                patched++;
+            }
+            catch (Exception ex) { log($"[SkillCD] OnSkillCDLayerChanged patch failed: {ex.Message}"); }
         }
 
-        if (patched == 0) { _harmony.UnpatchSelf(); _harmony = null; return false; }
-        return true;
+        // Nothing patched → nothing to tear down (the framework owns the Harmony instance and auto-unpatches
+        // on plugin dispose; we no longer call UnpatchSelf).
+        return patched != 0;
     }
 
     internal static void Uninstall()
     {
+        // Harmony teardown is owned by IHarmonyHost, which auto-unpatches every instance on plugin dispose —
+        // do NOT unpatch here (that would double-unpatch). Only reset our own transient reflection state.
         _activeCDs.Clear();
-        _harmony?.UnpatchSelf();
-        _harmony          = null;
         _miGetSkillId     = null;
         _piDuration       = null;
         _piCdKey          = null;
@@ -208,7 +206,7 @@ internal static class SkillCDPatch
     private static void ResolveLiveQuery()
     {
         _liveQueryReady = true;
-        var t = FindType("Panda.ZGame.ZBattleUtils");
+        var t = StellarInterop.FindType("Panda.ZGame.ZBattleUtils");
         if (t == null) { _log?.Invoke("[SkillCD] ZBattleUtils not found"); return; }
 
         foreach (var m in t.GetMethods(BindingFlags.Public | BindingFlags.Static))
@@ -229,15 +227,5 @@ internal static class SkillCDPatch
             _piProgress ??= cdDataType.GetProperty("Progress", BindingFlags.Public | BindingFlags.Instance);
         }
         _log?.Invoke($"[SkillCD] live query ready: TryGetCDData={_miTryGetCDData != null}");
-    }
-
-    internal static Type? FindType(string fullName)
-    {
-        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            var t = asm.GetType(fullName);
-            if (t is not null) return t;
-        }
-        return null;
     }
 }

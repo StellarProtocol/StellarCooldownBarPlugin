@@ -25,7 +25,10 @@ public sealed partial class Plugin
                 DefaultRect: new WindowRect(900f, 120f, 360f, 500f),
                 Category:    WindowCategory.Tools,
                 Style:       WindowPanelStyle.GlassMenu)
-            { StartVisible = false, HideUntilInWorld = true, Closable = true, Draggable = true },
+            { StartVisible = false, Closable = true, Draggable = true,
+              // Gameplay tool: draw only while in-world, and hide during loading screens.
+              ShouldRender = () => _services.ClientState.Phase == GamePhase.World
+                                   && (_services.ClientState.UiState & GameUIState.Loading) == 0 },
             BuildSettingsRoot(),
             OnClose: () => _settings.SetVisible(false)));
 
