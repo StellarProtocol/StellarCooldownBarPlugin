@@ -16,6 +16,7 @@ public sealed partial class Plugin : IStellarPlugin
     public string Name => "CooldownBar";
 
     private readonly IPluginServices _services;
+    private readonly ILocalization _loc;
     private readonly IConfigSection _cfg;
     private readonly CooldownBarSelection _selection;
     private readonly DebuffAttribution _attr;
@@ -35,6 +36,7 @@ public sealed partial class Plugin : IStellarPlugin
     public Plugin(IPluginServices services)
     {
         _services = services;
+        _loc = services.Localization;
         _cfg = _services.Config.GetSection("cooldownbar");
         _bgOpacity = _cfg.Get("bar.bg_opacity", 0f);
         _selection = CooldownBarSelection.Load(_cfg);
@@ -70,7 +72,7 @@ public sealed partial class Plugin : IStellarPlugin
         _toggleAction = _services.Hotkeys.DeclareAction(
             new HotkeyAction(
                 Id:               "cooldownbar.settings",
-                Description:      "Toggle CooldownBar settings",
+                Description:      _loc.T("cd.hotkey.toggle"),
                 SuggestedDefault: new KeyBinding(StellarKeyCode.F8)),
             callback: () => _settings.SetVisible(!_settings.IsShown));
 

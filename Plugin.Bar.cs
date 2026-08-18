@@ -31,7 +31,7 @@ public sealed partial class Plugin
             Width: 26f);
         var header = new RowElement(new HudElement[]
         {
-            new TextElement(() => "Cooldowns", () => MutedCol, Shadow: true),
+            new TextElement(() => _loc.T("cd.barTitle"), () => MutedCol, Shadow: true),
             new SpacerElement(),
             gear,
         });
@@ -101,7 +101,7 @@ public sealed partial class Plugin
 
         var hint = new ConditionalElement(
             () => _tileCount == 0,
-            new TextElement(() => "No active cooldowns — click the gear (top-right) to pick what to show", () => MutedCol, Shadow: true));
+            new TextElement(() => _loc.T("cd.empty"), () => MutedCol, Shadow: true));
 
         var tileRows = new ColumnElement(new HudElement[]
         {
