@@ -1,0 +1,17 @@
+{
+  "cd.barBackground": "พื้นหลังแถบ",
+  "cd.barTitle": "คูลดาวน์",
+  "cd.count.buffs": "{0} / {1} บัฟ",
+  "cd.count.debuffs": "{0} / {1} ดีบัฟ",
+  "cd.count.skills": "{0} / {1} สกิล",
+  "cd.empty": "ไม่มีคูลดาวน์ที่ทำงานอยู่ — คลิกไอคอนเฟือง (มุมขวาบน) เพื่อเลือกสิ่งที่จะแสดง",
+  "cd.filterMode": "โหมดกรอง",
+  "cd.hotkey.toggle": "สลับการตั้งค่า CooldownBar",
+  "cd.mode.excludeSelected": "แสดงทั้งหมด ยกเว้นที่เลือก",
+  "cd.mode.onlySelected": "แสดงเฉพาะที่เลือก",
+  "cd.settings.subtitle": "สลับสิ่งที่แสดงบน CooldownBar",
+  "cd.settings.title": "CooldownBar — ติดตาม",
+  "cd.tab.buffs": "บัฟ",
+  "cd.tab.debuffs": "ดีบัฟ",
+  "cd.tab.skills": "สกิล"
+}

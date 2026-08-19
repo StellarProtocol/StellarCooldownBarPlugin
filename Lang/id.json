@@ -1,0 +1,17 @@
+{
+  "cd.barBackground": "Latar Bilah",
+  "cd.barTitle": "Cooldown",
+  "cd.count.buffs": "{0} / {1} buff",
+  "cd.count.debuffs": "{0} / {1} debuff",
+  "cd.count.skills": "{0} / {1} skill",
+  "cd.empty": "Tidak ada cooldown aktif — klik ikon roda gigi (kanan atas) untuk memilih yang ditampilkan",
+  "cd.filterMode": "Mode filter",
+  "cd.hotkey.toggle": "Alihkan pengaturan CooldownBar",
+  "cd.mode.excludeSelected": "Tampilkan semua, kecuali yang dipilih",
+  "cd.mode.onlySelected": "Tampilkan hanya yang dipilih",
+  "cd.settings.subtitle": "Alihkan apa yang tampil di CooldownBar",
+  "cd.settings.title": "CooldownBar — Lacak",
+  "cd.tab.buffs": "Buff",
+  "cd.tab.debuffs": "Debuff",
+  "cd.tab.skills": "Skill"
+}

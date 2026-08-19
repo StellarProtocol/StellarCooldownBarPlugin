@@ -12,7 +12,7 @@ public sealed partial class Plugin
     private static readonly ColorRgba InactiveTabCol    = new(0.65f, 0.65f, 0.65f, 1f);  // grey
     private static readonly ColorRgba DebuffTabActiveCol = new(1.00f, 0.35f, 0.35f, 1f); // red   — Debuffs active
     private static readonly ColorRgba BuffTabActiveCol   = new(0.35f, 1.00f, 0.50f, 1f); // green — Buffs active
-    private static readonly string[] ModeOptions = { "Show only selected", "Show all, exclude selected" };
+    private static readonly string[] ModeOptionKeys = { "cd.mode.onlySelected", "cd.mode.excludeSelected" };
 
     private int _activeTab = 0;   // 0 = Skills, 1 = Debuffs, 2 = Buffs
     private bool _stScrollReset, _dtScrollReset, _btScrollReset;
@@ -21,7 +21,7 @@ public sealed partial class Plugin
         => _services.Windows.Register(new WindowRegistration(
             new WindowSpec(
                 Id:          "cooldownbar.settings",
-                Title:       "CooldownBar — Track",
+                Title:       _loc.T("cd.settings.title"),
                 DefaultRect: new WindowRect(900f, 120f, 360f, 500f),
                 Category:    WindowCategory.Tools,
                 Style:       WindowPanelStyle.GlassMenu)
@@ -43,7 +43,7 @@ public sealed partial class Plugin
     {
         var bgRow = new RowElement(new HudElement[]
         {
-            new TextElement(() => "Bar Background"),
+            new TextElement(() => _loc.T("cd.barBackground")),
             new SpacerElement(Width: 0f),
             new TextElement(() => $"{(int)System.Math.Round(_bgOpacity * 100)}%"),
             new SliderElement(() => _bgOpacity, SetBgOpacity) { Width = 120f },
@@ -52,17 +52,17 @@ public sealed partial class Plugin
         var tabStrip = new RowElement(new HudElement[]
         {
             new CellElement(
-                new ButtonElement(() => "Skills",
+                new ButtonElement(() => _loc.T("cd.tab.skills"),
                     OnClick: () => { _activeTab = 0; EnsureSkillTabLoaded(); ApplySkillTabFilter(_stFilter); _stScrollReset = true; },
                     Active: () => _activeTab == 0),
                 Weight: 1f),
             new CellElement(
-                new ButtonElement(() => "Debuffs",
+                new ButtonElement(() => _loc.T("cd.tab.debuffs"),
                     OnClick: () => { _activeTab = 1; EnsureBuffTabLoaded(); ApplyDebuffTabFilter(_dtFilter); _dtScrollReset = true; },
                     Active: () => _activeTab == 1),
                 Weight: 1f),
             new CellElement(
-                new ButtonElement(() => "Buffs",
+                new ButtonElement(() => _loc.T("cd.tab.buffs"),
                     OnClick: () => { _activeTab = 2; EnsureBuffTabLoaded(); ApplyBuffTabFilter(_btFilter); _btScrollReset = true; },
                     Active: () => _activeTab == 2),
                 Weight: 1f),
@@ -70,11 +70,11 @@ public sealed partial class Plugin
 
         var modeRow = new RowElement(new HudElement[]
         {
-            new TextElement(() => "Filter mode"),
+            new TextElement(() => _loc.T("cd.filterMode")),
             new SpacerElement(Width: 0f),
             new DropdownElement(
                 Selected: () => (int)ActiveTabMode(),
-                Options:  () => ModeOptions,
+                Options:  () => System.Array.ConvertAll(ModeOptionKeys, _loc.T),
                 OnSelect: v => SetActiveTabMode((TrackMode)v),
                 Width: 210f),
         }, Gap: 6f);
@@ -83,7 +83,7 @@ public sealed partial class Plugin
         {
             bgRow,
             new SeparatorElement(),
-            new TextElement(() => "Toggle what appears on the CooldownBar", Emphasis: true),
+            new TextElement(() => _loc.T("cd.settings.subtitle"), Emphasis: true),
             tabStrip,
             modeRow,
             new SeparatorElement(),
@@ -141,7 +141,7 @@ public sealed partial class Plugin
             new InputElement(
                 Get: () => _stFilter, Submit: ApplySkillTabFilter,
                 Width: 340f, OnChange: ApplySkillTabFilter),
-            new TextElement(() => $"{_stFiltCount} / {_stCount} skills"),
+            new TextElement(() => _loc.TFormat("cd.count.skills", _stFiltCount, _stCount)),
             new VirtualListElement(
                 Count:    () => { EnsureSkillTabLoaded(); return _stFiltCount; },
                 RowHeight: 32f, Pool: pool,
@@ -178,7 +178,7 @@ public sealed partial class Plugin
             new InputElement(
                 Get: () => _dtFilter, Submit: ApplyDebuffTabFilter,
                 Width: 340f, OnChange: ApplyDebuffTabFilter),
-            new TextElement(() => $"{_dtFiltCount} / {_dtCount} debuffs"),
+            new TextElement(() => _loc.TFormat("cd.count.debuffs", _dtFiltCount, _dtCount)),
             new VirtualListElement(
                 Count:    () => { EnsureBuffTabLoaded(); return _dtFiltCount; },
                 RowHeight: 32f, Pool: pool,
@@ -215,7 +215,7 @@ public sealed partial class Plugin
             new InputElement(
                 Get: () => _btFilter, Submit: ApplyBuffTabFilter,
                 Width: 340f, OnChange: ApplyBuffTabFilter),
-            new TextElement(() => $"{_btFiltCount} / {_btCount} buffs"),
+            new TextElement(() => _loc.TFormat("cd.count.buffs", _btFiltCount, _btCount)),
             new VirtualListElement(
                 Count:    () => { EnsureBuffTabLoaded(); return _btFiltCount; },
                 RowHeight: 32f, Pool: pool,

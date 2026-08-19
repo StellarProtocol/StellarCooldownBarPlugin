@@ -64,6 +64,7 @@ public sealed partial class Plugin
             if (n >= MaxTiles) break;
             int baseId = ResolveNamedBaseSkill(entry.SkillId);
             if (baseId == 0) continue;
+            if (_seenSkillIds.Add(baseId)) _seenDirty = true;   // fold into the Skills filter list (before the exclude gate, so excluded skills stay toggleable)
             bool inList = _selection.IsCooldownTracked(baseId);
             if (skillExclude ? inList : !inList) continue;
             float rem = SkillCDPatch.GetRemainSec(entry);
