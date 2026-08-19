@@ -11,10 +11,18 @@ public sealed partial class Plugin
     private const int SettingsPoolSize = 14;
 
     // ── Skills tab raw + filtered data ────────────────────────────────────────
-    private int[]    _stIds       = Array.Empty<int>();
+    private int[]    _stIds       = Array.Empty<int>();   // merged source: base SkillTable + bar-seen extras
     private string[] _stNames     = Array.Empty<string>();
     private string[] _stDescs     = Array.Empty<string>();
     private int      _stCount     = 0;
+    private int[]    _stBaseIds   = Array.Empty<int>();   // raw SkillTable load (before folding in bar-seen skills)
+    private string[] _stBaseNames = Array.Empty<string>();
+    private string[] _stBaseDescs = Array.Empty<string>();
+    private bool     _stBaseLoaded;
+    // Base skill ids the bar has actually displayed. Folded into the Skills tab so every cooldown that can appear
+    // on the bar is toggleable — including placeholder-named skills the game's SkillTable doesn't list (owner 2026-08-19).
+    private readonly HashSet<int> _seenSkillIds = new();
+    private bool _seenDirty;
     private int[]    _stFiltIds   = Array.Empty<int>();
     private string[] _stFiltNames = Array.Empty<string>();
     private string[] _stFiltDescs = Array.Empty<string>();
@@ -54,9 +62,28 @@ public sealed partial class Plugin
 
     private void EnsureSkillTabLoaded()
     {
-        if (_stCount > 0) return;
-        LoadSettingsSkillTable();
-        if (_stCount > 0) ApplySkillTabFilter(_stFilter);
+        if (!_stBaseLoaded) { LoadSettingsSkillTable(); _stBaseLoaded = _stBaseIds.Length > 0; _seenDirty = true; }
+        if (_stBaseLoaded && _seenDirty) { RebuildMergedSkills(); ApplySkillTabFilter(_stFilter); _seenDirty = false; }
+    }
+
+    // Fold bar-seen skills (placeholder-named / SkillTable-absent) into the Skills tab so every cooldown that can
+    // appear on the bar is toggleable. Rebuilt from the raw table + the seen set whenever the seen set changes.
+    private void RebuildMergedSkills()
+    {
+        var ids   = new List<int>(_stBaseIds);
+        var names = new List<string>(_stBaseNames);
+        var descs = new List<string>(_stBaseDescs);
+        var have  = new HashSet<int>(_stBaseIds);
+        foreach (var id in _seenSkillIds)
+        {
+            if (!have.Add(id)) continue;                       // already in the base table (or a dup) — skip
+            var info = _services.GameData.Combat.GetSkill(id);
+            var nm   = info?.Name;
+            ids.Add(id);
+            names.Add(string.IsNullOrEmpty(nm) ? $"Skill {id}" : nm!);
+            descs.Add(info?.Description ?? "");
+        }
+        _stIds = ids.ToArray(); _stNames = names.ToArray(); _stDescs = descs.ToArray(); _stCount = ids.Count;
     }
 
     private void EnsureBuffTabLoaded()
@@ -122,8 +149,8 @@ public sealed partial class Plugin
                 string desc = (string?)(piDesc?.GetValue(row)) ?? "";
                 ids.Add(id); names.Add(name); descs.Add(desc);
             }
-            _stIds = ids.ToArray(); _stNames = names.ToArray(); _stDescs = descs.ToArray(); _stCount = ids.Count;
-            _services.Log.Info($"[Settings] loaded {_stCount} skills");
+            _stBaseIds = ids.ToArray(); _stBaseNames = names.ToArray(); _stBaseDescs = descs.ToArray();
+            _services.Log.Info($"[Settings] loaded {_stBaseIds.Length} skills");
         }
         catch (Exception ex)
         {
