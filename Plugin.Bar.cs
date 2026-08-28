@@ -139,11 +139,20 @@ public sealed partial class Plugin
         if (t.Kind == TileKind.Cooldown)
             return _services.GameAssets.LoadImagineIcon(t.IconSkillId, out _uv[idx])
                 ?? _services.GameAssets.LoadSkillIcon(t.Id, out _uv[idx]);
-        // Buff/debuff: show the source skill's icon when known, fall back to the buff/debuff icon.
+        // Buff/debuff: source skill's icon when known, then a curated EffectOverride icon (for icon-less buffs with
+        // no source skill — borrows an imagine/skill icon), falling back to the buff/debuff's own icon.
         if (t.IconSkillId > 0)
-            return _services.GameAssets.LoadImagineIcon(t.IconSkillId, out _uv[idx])
-                ?? _services.GameAssets.LoadSkillIcon(t.IconSkillId, out _uv[idx])
-                ?? _services.GameAssets.LoadBuffIcon(t.Id, out _uv[idx]);
+        {
+            var bySkill = _services.GameAssets.LoadImagineIcon(t.IconSkillId, out _uv[idx])
+                       ?? _services.GameAssets.LoadSkillIcon(t.IconSkillId, out _uv[idx]);
+            if (bySkill != null) return bySkill;
+        }
+        if (TranslatedBuffText.EffectOverrides.TryGetValue(t.Id, out var ov) && ov.IconSkill > 0)
+        {
+            var byOverride = _services.GameAssets.LoadImagineIcon(ov.IconSkill, out _uv[idx])
+                          ?? _services.GameAssets.LoadSkillIcon(ov.IconSkill, out _uv[idx]);
+            if (byOverride != null) return byOverride;
+        }
         return _services.GameAssets.LoadBuffIcon(t.Id, out _uv[idx]);
     }
 

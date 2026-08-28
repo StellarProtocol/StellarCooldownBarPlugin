@@ -22,6 +22,15 @@ internal static class TranslatedBuffText
 
     private static Dictionary<int, (string Name, string Desc, bool PlaceholderNamed)>? _map;
 
+    // Manual per-effect overrides for buffs the game data resolves poorly (unnamed / no icon), copied verbatim from
+    // TargetLens. baseId → (display name, imagine/skill id whose icon to borrow). IconSkill 3948 = "Arcane! Divine
+    // Reliance" imagine icon. The name wins over the automatic NameDesign resolution; the icon is a Bar fallback.
+    internal static readonly Dictionary<int, (string Name, int IconSkill)> EffectOverrides = new()
+    {
+        { 2110135, ("Rolora - Active Timer", 3948) },
+        { 2110111, ("Rolora - Spell",        3948) },
+    };
+
     internal static void EnsureLoaded(Action<string>? log)
     {
         if (_map != null) return;
@@ -72,6 +81,8 @@ internal static class TranslatedBuffText
     // gets the distinct NameDesign from the translated table (else the game name, else "#id").
     internal static string ResolveLabel(int baseId, string? gameName)
     {
+        // Curated override wins (specific buffs the game data can't resolve), then the automatic chain below.
+        if (EffectOverrides.TryGetValue(baseId, out var ov) && !string.IsNullOrEmpty(ov.Name)) return ov.Name;
         EnsureLoaded(null);
         bool placeholder = _map != null && _map.TryGetValue(baseId, out var row) && row.PlaceholderNamed;
         if (!string.IsNullOrEmpty(gameName) && !placeholder) return gameName!;
