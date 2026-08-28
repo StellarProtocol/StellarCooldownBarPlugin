@@ -6,6 +6,7 @@
   "cd.count.skills": "{0} / {1} skill",
   "cd.empty": "Tidak ada cooldown aktif — klik ikon roda gigi (kanan atas) untuk memilih yang ditampilkan",
   "cd.filterMode": "Mode filter",
+  "cd.group.variants": "×{0}",
   "cd.hotkey.toggle": "Alihkan pengaturan CooldownBar",
   "cd.mode.excludeSelected": "Tampilkan semua, kecuali yang dipilih",
   "cd.mode.onlySelected": "Tampilkan hanya yang dipilih",

@@ -6,6 +6,7 @@
   "cd.count.skills": "{0} / {1} สกิล",
   "cd.empty": "ไม่มีคูลดาวน์ที่ทำงานอยู่ — คลิกไอคอนเฟือง (มุมขวาบน) เพื่อเลือกสิ่งที่จะแสดง",
   "cd.filterMode": "โหมดกรอง",
+  "cd.group.variants": "×{0}",
   "cd.hotkey.toggle": "สลับการตั้งค่า CooldownBar",
   "cd.mode.excludeSelected": "แสดงทั้งหมด ยกเว้นที่เลือก",
   "cd.mode.onlySelected": "แสดงเฉพาะที่เลือก",

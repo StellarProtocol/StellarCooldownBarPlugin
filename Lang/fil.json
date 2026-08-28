@@ -6,6 +6,7 @@
   "cd.count.skills": "{0} / {1} skills",
   "cd.empty": "Walang aktibong cooldowns — i-click ang gear (kanang-itaas) para piliin kung ano ang ipapakita",
   "cd.filterMode": "Mode ng filter",
+  "cd.group.variants": "×{0}",
   "cd.hotkey.toggle": "I-toggle ang mga setting ng CooldownBar",
   "cd.mode.excludeSelected": "Ipakita lahat, alisin ang napili",
   "cd.mode.onlySelected": "Ipakita ang napili lamang",
