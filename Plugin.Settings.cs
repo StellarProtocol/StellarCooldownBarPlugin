@@ -109,6 +109,7 @@ public sealed partial class Plugin
         return new ColumnElement(new HudElement[]
         {
             bgRow,
+            new SeparatorElement(),   // divide bar-appearance (above) from tracking-scope controls (below)
             showHiddenRow,
             new TextElement(() => _loc.T("cd.showHidden.desc")),
             new SeparatorElement(),
