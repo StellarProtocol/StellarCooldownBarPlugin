@@ -12,6 +12,8 @@
   "cd.mode.onlySelected": "Ipakita ang napili lamang",
   "cd.settings.subtitle": "I-toggle kung ano ang lalabas sa CooldownBar",
   "cd.settings.title": "CooldownBar — I-track",
+  "cd.showHidden": "Ipakita ang mga nakatagong effect",
+  "cd.showHidden.desc": "Ilista at ipakita ang mga internal na buff na walang pangalan o icon",
   "cd.tab.buffs": "Buffs",
   "cd.tab.debuffs": "Debuffs",
   "cd.tab.skills": "Skills"

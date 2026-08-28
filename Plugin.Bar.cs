@@ -51,7 +51,7 @@ public sealed partial class Plugin
                     Accent:      () => AccentColor(c),
                     IsImagine:   () => false,
                     ChargeCount: () => c < _tileCount ? _tiles[c].ChargeCount : 0)
-                { OnClick = () => OnTileClick(c) });
+                { OnClick = () => OnTileClick(c), FallbackLabel = () => Abbrev(TileName(c)) });
         }
         row1[MaxTilesPerRow] = new ConditionalElement(
             () => _rowsVisible < 2 && _totalTileCount > _tileCount,
@@ -72,7 +72,7 @@ public sealed partial class Plugin
                     Accent:      () => AccentColor(_tilesPerRow + c),
                     IsImagine:   () => false,
                     ChargeCount: () => { int ti = _tilesPerRow + c; return ti < _tileCount ? _tiles[ti].ChargeCount : 0; })
-                { OnClick = () => OnTileClick(_tilesPerRow + c) });
+                { OnClick = () => OnTileClick(_tilesPerRow + c), FallbackLabel = () => Abbrev(TileName(_tilesPerRow + c)) });
         }
         row2[MaxTilesPerRow] = new ConditionalElement(
             () => _rowsVisible == 2 && _totalTileCount > _tileCount,
@@ -93,7 +93,7 @@ public sealed partial class Plugin
                     Accent:      () => AccentColor(_tilesPerRow * 2 + c),
                     IsImagine:   () => false,
                     ChargeCount: () => { int ti = _tilesPerRow * 2 + c; return ti < _tileCount ? _tiles[ti].ChargeCount : 0; })
-                { OnClick = () => OnTileClick(_tilesPerRow * 2 + c) });
+                { OnClick = () => OnTileClick(_tilesPerRow * 2 + c), FallbackLabel = () => Abbrev(TileName(_tilesPerRow * 2 + c)) });
         }
         row3[MaxTilesPerRow] = new ConditionalElement(
             () => _rowsVisible >= 3 && _totalTileCount > _tileCount,
@@ -156,6 +156,33 @@ public sealed partial class Plugin
         string time = secs >= 10f ? $"{(int)secs}s" : $"{secs:F1}s";
         if (t.Fallback) time = "*" + time;
         return time;
+    }
+
+    // Resolved display name for a tile — the source for the icon-less fallback badge. Skills use the game name;
+    // buffs/debuffs route through the unified translated resolver so hidden effects get a distinct NameDesign label.
+    private string TileName(int idx)
+    {
+        if (idx >= _tileCount) return "";
+        var t = _tiles[idx];
+        if (t.Kind == TileKind.Cooldown)
+            return _services.GameData.Combat.GetSkill(t.Id)?.Name ?? "";
+        return TranslatedBuffText.ResolveLabel(t.Id, _services.GameData.Combat.GetBuff(t.Id)?.Name);
+    }
+
+    // First two letter/digit characters of the (tag-stripped) name, uppercased. The framework draws this only when
+    // an effect has no icon, so normal (icon-bearing) tiles are unaffected. (Copied from TargetLens.)
+    private static string Abbrev(string name)
+    {
+        name = StripTags(name);
+        char a = '\0', b = '\0';
+        foreach (var c in name)
+        {
+            if (!char.IsLetterOrDigit(c)) continue;
+            if (a == '\0') a = char.ToUpperInvariant(c);
+            else { b = char.ToUpperInvariant(c); break; }
+        }
+        if (a == '\0') return "";
+        return b == '\0' ? a.ToString() : new string(new[] { a, b });
     }
 
     // Embedded settings-gear PNG bytes (cached). Same resource StatInspector ships; the ⚙ glyph has no in-game

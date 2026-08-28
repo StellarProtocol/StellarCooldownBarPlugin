@@ -6,6 +6,47 @@ namespace Stellar.CooldownBar;
 
 internal static partial class BuffTrackPatch
 {
+    // ── Show-hidden: full (unfiltered) buff list source ──────────────────────────
+    // When ShowHidden is on the bar reads the FULL server buff list (pBuffList_ / buffList_) instead of the game's
+    // display-filtered "showed" list (pShowedBuffList_ / showedBuffList_), so icon-less / internal buffs appear.
+    // Both PropertyInfos resolve once (the showed one via ResolveShowedList in BuffTrackPatch.cs, the full one here);
+    // RefreshActiveBuffs picks between them at read-time from this flag. Set from Plugin whenever config changes.
+    internal static bool ShowHidden;
+
+    private static PropertyInfo? _piFullBuffList;
+    private static bool          _fullListResolved;
+
+    // Prefer the FULL unfiltered lists (mirrors TargetLens' ResolveShowedList priority), showed lists only as fallback.
+    private static void ResolveFullBuffList(object comp)
+    {
+        _fullListResolved = true;
+        PropertyInfo? best = null; int bestPrio = 99;
+        foreach (var p in comp.GetType().GetProperties(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance))
+        {
+            int prio = p.Name switch { "pBuffList_" => 0, "buffList_" => 1, "pShowedBuffList_" => 2, "showedBuffList_" => 3, _ => 99 };
+            if (prio < bestPrio) { best = p; bestPrio = prio; if (bestPrio == 0) break; }
+        }
+        _piFullBuffList = best;
+    }
+
+    // The server buff list to iterate this refresh: full (unfiltered) when ShowHidden, else the display-filtered list.
+    private static object? GetActiveServerList(object comp)
+    {
+        if (ShowHidden)
+        {
+            if (!_fullListResolved) ResolveFullBuffList(comp);
+            return _piFullBuffList?.GetValue(comp);
+        }
+        if (!_showedListResolved) ResolveShowedList();
+        return _piShowedBuffList?.GetValue(comp);
+    }
+
+    // Reset the show-hidden list caches on Uninstall (called from BuffTrackPatch.cs Uninstall).
+    private static void ResetShowHiddenCaches()
+    {
+        _piFullBuffList = null; _fullListResolved = false;
+    }
+
     private static MethodInfo?   _miGetBuffTable;
     private static object?       _buffTableInst;
     private static MethodInfo?   _miGetBuffRow;
@@ -34,7 +75,10 @@ internal static partial class BuffTrackPatch
             _piBuffRowVisible ??= t.GetProperty("Visible",  BindingFlags.Public | BindingFlags.Instance);
             _piBuffRowType    ??= t.GetProperty("BuffType", BindingFlags.Public | BindingFlags.Instance);
             _piBuffRowSkillId ??= t.GetProperty("SkillId",  BindingFlags.Public | BindingFlags.Instance);
-            name     = (string?)(_piBuffRowName?.GetValue(row)) ?? "";
+            // Resolve to the translated display label (game Name for real buffs, NameDesign for hidden / placeholder-
+            // named ones) so a hidden buff's BuffName is never empty — the bar's empty-name render gate then passes.
+            string gameName = (string?)(_piBuffRowName?.GetValue(row)) ?? "";
+            name     = TranslatedBuffText.ResolveLabel(baseId, gameName);
             visible  = (int?)(_piBuffRowVisible?.GetValue(row));
             buffType = (int?)(_piBuffRowType?.GetValue(row));
             skillId  = (int?)(_piBuffRowSkillId?.GetValue(row)) ?? 0;

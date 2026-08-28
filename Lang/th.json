@@ -12,6 +12,8 @@
   "cd.mode.onlySelected": "แสดงเฉพาะที่เลือก",
   "cd.settings.subtitle": "สลับสิ่งที่แสดงบน CooldownBar",
   "cd.settings.title": "CooldownBar — ติดตาม",
+  "cd.showHidden": "แสดงเอฟเฟกต์ที่ซ่อนอยู่",
+  "cd.showHidden.desc": "แสดงรายการและแสดงบัฟภายในที่ไม่มีชื่อหรือไอคอน",
   "cd.tab.buffs": "บัฟ",
   "cd.tab.debuffs": "ดีบัฟ",
   "cd.tab.skills": "สกิล"

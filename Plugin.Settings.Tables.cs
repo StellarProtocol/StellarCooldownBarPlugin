@@ -152,7 +152,12 @@ public sealed partial class Plugin
                 if (id <= 0) continue;
                 string name = (string?)(piName?.GetValue(row)) ?? "";
                 string icon = (string?)(piIcon?.GetValue(row)) ?? "";
-                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(icon)) continue;
+                // Show-hidden: keep every id>0 row. An unnamed hidden skill still needs a usable list label.
+                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(icon))
+                {
+                    if (!_showHidden) continue;
+                    if (string.IsNullOrEmpty(name)) name = $"Skill {id}";
+                }
                 string desc = (string?)(piDesc?.GetValue(row)) ?? "";
                 ids.Add(id); names.Add(name); descs.Add(desc);
             }
@@ -189,6 +194,9 @@ public sealed partial class Plugin
             // Group by display Name (exact match, first-seen order). name → group index into the parallel lists.
             var dGroups = new BuffGroupAccumulator();
             var bGroups = new BuffGroupAccumulator();
+            // Show-hidden uses the resolved label (game Name for real buffs, NameDesign for hidden ones) BOTH as the
+            // display name and the grouping key, so distinct hidden buffs don't collapse into one placeholder blob.
+            if (_showHidden) TranslatedBuffText.EnsureLoaded(_services.Log.Info);
             PropertyInfo? piKvp = null, piId = null, piName = null, piIcon = null, piType = null, piDesc = null;
 
             foreach (var item in SettingsReflectEnumerate(values))
@@ -213,11 +221,13 @@ public sealed partial class Plugin
                 }
                 int id = (int)(piId?.GetValue(row) ?? 0);
                 if (id <= 0) continue;
-                string name = (string?)(piName?.GetValue(row)) ?? "";
+                string gameName = (string?)(piName?.GetValue(row)) ?? "";
                 string icon = (string?)(piIcon?.GetValue(row)) ?? "";
-                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(icon)) continue;
+                if (!_showHidden && (string.IsNullOrEmpty(gameName) || string.IsNullOrEmpty(icon))) continue;
                 string desc = (string?)(piDesc?.GetValue(row)) ?? "";
                 int buffType = (int)(piType?.GetValue(row) ?? -1);
+                // OFF: keep today's behaviour (raw game Name). ON: resolved label for display + grouping.
+                string name = _showHidden ? TranslatedBuffText.ResolveLabel(id, gameName) : gameName;
                 (buffType == 0 ? dGroups : bGroups).Add(name, id, desc);
             }
             dGroups.Export(out _dtIds, out _dtNames, out _dtDescs, out _dtMembers, out _dtCount);

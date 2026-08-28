@@ -33,12 +33,19 @@ public sealed partial class Plugin : IStellarPlugin
     // Bar background: black at this opacity (0 = fully transparent, 1 = fully black). Persisted in config.
     private float _bgOpacity;
 
+    // "Show hidden effects": when on, the picker lists ALL buff/skill rows (no Name/Icon filter) and the bar reads
+    // the full unfiltered buff list, so internal/icon-less effects can be tracked. Persisted in config.
+    private bool _showHidden;
+
     public Plugin(IPluginServices services)
     {
         _services = services;
         _loc = services.Localization;
         _cfg = _services.Config.GetSection("cooldownbar");
         _bgOpacity = _cfg.Get("bar.bg_opacity", 0f);
+        _showHidden = _cfg.Get("bar.show_hidden", false);
+        BuffTrackPatch.ShowHidden = _showHidden;               // full-vs-showed buff list source for the bar
+        TranslatedBuffText.EnsureLoaded(_services.Log.Info);   // English NameDesign labels (one-time lazy load)
         _selection = CooldownBarSelection.Load(_cfg);
         _attr = new DebuffAttribution(
             buffSkillId:    id => _services.GameData.Combat.GetBuff(id)?.SkillId ?? 0,

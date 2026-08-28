@@ -12,6 +12,8 @@
   "cd.mode.onlySelected": "Show only selected",
   "cd.settings.subtitle": "Toggle what appears on the CooldownBar",
   "cd.settings.title": "CooldownBar — Track",
+  "cd.showHidden": "Show hidden effects",
+  "cd.showHidden.desc": "List and display internal buffs that have no name or icon",
   "cd.tab.buffs": "Buffs",
   "cd.tab.debuffs": "Debuffs",
   "cd.tab.skills": "Skills"

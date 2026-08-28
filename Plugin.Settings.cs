@@ -39,6 +39,26 @@ public sealed partial class Plugin
         _cfg.Save();
     }
 
+    private void SetShowHidden(bool on)
+    {
+        _showHidden = on;
+        _cfg.Set("bar.show_hidden", on);
+        _cfg.Save();
+        BuffTrackPatch.ShowHidden = on;                       // bar reads full-vs-showed buff list
+
+        // The Name/Icon filter (and the buff-group label resolution) depends on this flag, so drop the loaded
+        // picker tables and rebuild them on next access, then re-apply the active search filters so an already-open
+        // list repopulates immediately — without needing to close and reopen the settings window.
+        _buffTabLoaded = false;
+        _stBaseLoaded  = false;
+        _seenDirty     = true;
+        EnsureSkillTabLoaded();
+        EnsureBuffTabLoaded();
+        ApplySkillTabFilter(_stFilter);
+        ApplyDebuffTabFilter(_dtFilter);
+        ApplyBuffTabFilter(_btFilter);
+    }
+
     private HudElement BuildSettingsRoot()
     {
         var bgRow = new RowElement(new HudElement[]
@@ -47,6 +67,13 @@ public sealed partial class Plugin
             new SpacerElement(Width: 0f),
             new TextElement(() => $"{(int)System.Math.Round(_bgOpacity * 100)}%"),
             new SliderElement(() => _bgOpacity, SetBgOpacity) { Width = 120f },
+        }, Gap: 6f);
+
+        var showHiddenRow = new RowElement(new HudElement[]
+        {
+            new TextElement(() => _loc.T("cd.showHidden")),
+            new SpacerElement(Width: 0f),
+            new ToggleElement(() => "", () => _showHidden, SetShowHidden),
         }, Gap: 6f);
 
         var tabStrip = new RowElement(new HudElement[]
@@ -82,6 +109,8 @@ public sealed partial class Plugin
         return new ColumnElement(new HudElement[]
         {
             bgRow,
+            showHiddenRow,
+            new TextElement(() => _loc.T("cd.showHidden.desc")),
             new SeparatorElement(),
             new TextElement(() => _loc.T("cd.settings.subtitle"), Emphasis: true),
             tabStrip,

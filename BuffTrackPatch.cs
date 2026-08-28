@@ -153,6 +153,7 @@ internal static partial class BuffTrackPatch
         _activeBuffs.Clear();
         _localBuffComp = _localClientBuffComp = null;
         _piShowedBuffList = null; _showedListResolved = false;
+        ResetShowHiddenCaches();
         _piBuffItemUuid = _piBuffItemBaseId = _piBuffItemLayer = _piBuffItemLevel = _piBuffItemDuration = null;
         _piBuffItemCreateTime = null;
         _buffItemFieldsResolved = false;
@@ -182,8 +183,8 @@ internal static partial class BuffTrackPatch
 
         if (_localBuffComp != null)
         {
-            if (!_showedListResolved) ResolveShowedList();
-            var list = _piShowedBuffList?.GetValue(_localBuffComp);
+            // Full (unfiltered) list when ShowHidden, else the game's display-filtered "showed" list. See Tables.cs.
+            var list = GetActiveServerList(_localBuffComp);
             if (list != null)
             {
                 try
