@@ -12,7 +12,7 @@
   "cd.mode.onlySelected": "選択したもののみ表示",
   "cd.settings.subtitle": "CooldownBarに表示する項目を切替",
   "cd.settings.title": "CooldownBar — 追跡",
-  "cd.showHidden": "隠し効果を表示",
+  "cd.showHidden": "隠し効果を表示（実験的）",
   "cd.showHidden.desc": "名前やアイコンのない内部バフも一覧・表示する",
   "cd.tab.buffs": "バフ",
   "cd.tab.debuffs": "デバフ",

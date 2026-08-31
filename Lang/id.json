@@ -12,7 +12,7 @@
   "cd.mode.onlySelected": "Tampilkan hanya yang dipilih",
   "cd.settings.subtitle": "Alihkan apa yang tampil di CooldownBar",
   "cd.settings.title": "CooldownBar — Lacak",
-  "cd.showHidden": "Tampilkan efek tersembunyi",
+  "cd.showHidden": "Tampilkan efek tersembunyi (eksperimental)",
   "cd.showHidden.desc": "Cantumkan dan tampilkan buff internal yang tidak memiliki nama atau ikon",
   "cd.tab.buffs": "Buff",
   "cd.tab.debuffs": "Debuff",
