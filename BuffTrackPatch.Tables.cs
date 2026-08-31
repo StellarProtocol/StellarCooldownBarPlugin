@@ -45,6 +45,56 @@ internal static partial class BuffTrackPatch
     private static void ResetShowHiddenCaches()
     {
         _piFullBuffList = null; _fullListResolved = false;
+        _serverTimeResolved = false; _serverTimeInst = null; _miGetServerTime = null;
+    }
+
+    // ── Server clock (true buff remaining = CreateTime + Duration − serverNow) ────
+    // Ported from TargetBuffTracker.ServerNowMs / ComputeSnapRemain. Seeding SnapRemain at full duration is only
+    // correct for a just-created buff; a re-polled buff (or one re-synced with a changed CreateTime on a zone change)
+    // is usually partway through its life, so full-duration seeding over-reads remaining — and on a zone change
+    // re-syncs the tile back to full. The game itself computes remaining as CreateTime + Duration − serverNow (all
+    // ms, server-synced Unix epoch); mirror that. See Buff-Tracking.md §7.
+    private static bool        _serverTimeResolved;
+    private static object?     _serverTimeInst;
+    private static MethodInfo? _miGetServerTime;
+
+    // Current server time in ms (Unix-epoch, same clock as BuffItem.CreateTime/Duration). 0 = unavailable.
+    // Lazy-retry the singleton while it's still null (mirrors ResolveEntityMgr) so a frame-1 miss — before the
+    // singleton is up — doesn't permanently disable the feature; the MethodInfo caches once resolved.
+    private static long ServerNowMs()
+    {
+        if (!_serverTimeResolved)
+        {
+            var t = StellarInterop.FindType("Panda.Utility.ZServerTime");
+            if (t == null) { _serverTimeResolved = true; return 0L; }   // type gone → give up permanently
+            _serverTimeInst  ??= StellarInterop.GetSingleton(t);
+            _miGetServerTime ??= t.GetMethod("GetServerTime", BindingFlags.Public | BindingFlags.Instance);
+            if (_serverTimeInst != null) _serverTimeResolved = true;    // latch only once the instance resolves
+        }
+        if (_serverTimeInst == null || _miGetServerTime == null) return 0L;
+        try { return (long)(_miGetServerTime.Invoke(_serverTimeInst, null) ?? 0L); }
+        catch { return 0L; }
+    }
+
+    // True remaining seconds from the server clock: CreateTime + Duration − serverNow (all ms, same epoch),
+    // clamped to [0, full]. Falls back to full duration (old behavior) unless BOTH the server clock AND the
+    // create time are plausible synced Unix-epoch ms (≥ 1.6e12 ≈ 2020-09):
+    //  • serverNow guard — ZServerTime returns a tiny/1970 value before the first server-time sync; trusting it
+    //    would hide every timed buff until sync.
+    //  • createMs guard — server buffs (BuffItem.CreateTime) are verified server-epoch, but client buffs
+    //    (ClientBuffInfo.CreateTime, double→long) have an UNVERIFIED epoch. If it were a small game-time value,
+    //    createMs + durMs − serverNow would be hugely negative and hide every client buff (worse than the original
+    //    bug). This guard keeps the client path on full-duration fallback until/unless its epoch is confirmed.
+    private static float ComputeSnapRemain(long durMs, long createMs, long serverNow)
+    {
+        if (durMs <= 0) return -1f;                       // permanent → no timer
+        if (serverNow >= 1_600_000_000_000L && createMs >= 1_600_000_000_000L)
+        {
+            float remain = (createMs + durMs - serverNow) / 1000f;
+            float full   = durMs / 1000f;
+            return remain < 0f ? 0f : (remain > full ? full : remain);   // clamp [0, full]
+        }
+        return durMs / 1000f;                             // pre-sync / unverified-epoch client buff → full (unchanged)
     }
 
     private static MethodInfo?   _miGetBuffTable;

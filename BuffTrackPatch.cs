@@ -276,7 +276,9 @@ internal static partial class BuffTrackPatch
             entry.Duration   = durMs;
             entry.CreateTime = createMs;
             entry.SnapTick   = Environment.TickCount64;
-            entry.SnapRemain = durMs > 0 ? durMs / 1000f : -1f;
+            // Seed from the server clock (CreateTime + Duration − serverNow), NOT full duration — a re-polled or
+            // zone-change re-synced buff is partway through its life. See Buff-Tracking.md §7 / ComputeSnapRemain.
+            entry.SnapRemain = ComputeSnapRemain(entry.Duration, createMs, ServerNowMs());
         }
     }
 
@@ -307,7 +309,9 @@ internal static partial class BuffTrackPatch
             entry.Duration   = durMs;
             entry.CreateTime = createMs;
             entry.SnapTick   = Environment.TickCount64;
-            entry.SnapRemain = maxLife > 0f ? maxLife : -1f;
+            // ClientBuffInfo.CreateTime has an UNVERIFIED epoch — the createMs ≥ 1.6e12 guard in ComputeSnapRemain
+            // keeps this path on the full-duration fallback until that epoch is confirmed (see Buff-Tracking.md §7).
+            entry.SnapRemain = ComputeSnapRemain(entry.Duration, createMs, ServerNowMs());
         }
     }
 
