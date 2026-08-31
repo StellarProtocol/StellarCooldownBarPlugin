@@ -32,26 +32,33 @@ public sealed partial class Plugin
     private readonly UvRect[] _stUv = new UvRect[SettingsPoolSize];
 
     // ── Debuffs tab raw + filtered data ──────────────────────────────────────
-    private int[]    _dtIds       = Array.Empty<int>();
+    // Rows are GROUPED by display Name: _dtIds/_dtNames/_dtDescs hold one representative per group (first-seen
+    // member), _dtMembers holds every id sharing that Name. Selection stays per-id (a toggle writes all members).
+    private int[]    _dtIds       = Array.Empty<int>();     // representative id per group (icon + tooltip)
     private string[] _dtNames     = Array.Empty<string>();
     private string[] _dtDescs     = Array.Empty<string>();
+    private int[][]  _dtMembers   = Array.Empty<int[]>();   // all ids sharing each group's Name
     private int      _dtCount     = 0;
     private int[]    _dtFiltIds   = Array.Empty<int>();
     private string[] _dtFiltNames = Array.Empty<string>();
     private string[] _dtFiltDescs = Array.Empty<string>();
+    private int[][]  _dtFiltMembers = Array.Empty<int[]>();
     private int      _dtFiltCount = 0;
     private string   _dtFilter    = "";
     private int      _dtOffset    = 0;
     private readonly UvRect[] _dtUv = new UvRect[SettingsPoolSize];
 
     // ── Buffs tab raw + filtered data ─────────────────────────────────────────
-    private int[]    _btIds       = Array.Empty<int>();
+    // Grouped by display Name — see the Debuffs block above.
+    private int[]    _btIds       = Array.Empty<int>();     // representative id per group
     private string[] _btNames     = Array.Empty<string>();
     private string[] _btDescs     = Array.Empty<string>();
+    private int[][]  _btMembers   = Array.Empty<int[]>();   // all ids sharing each group's Name
     private int      _btCount     = 0;
     private int[]    _btFiltIds   = Array.Empty<int>();
     private string[] _btFiltNames = Array.Empty<string>();
     private string[] _btFiltDescs = Array.Empty<string>();
+    private int[][]  _btFiltMembers = Array.Empty<int[]>();
     private int      _btFiltCount = 0;
     private string   _btFilter    = "";
     private int      _btOffset    = 0;
@@ -145,7 +152,12 @@ public sealed partial class Plugin
                 if (id <= 0) continue;
                 string name = (string?)(piName?.GetValue(row)) ?? "";
                 string icon = (string?)(piIcon?.GetValue(row)) ?? "";
-                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(icon)) continue;
+                // Show-hidden: keep every id>0 row. An unnamed hidden skill still needs a usable list label.
+                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(icon))
+                {
+                    if (!_showHidden) continue;
+                    if (string.IsNullOrEmpty(name)) name = $"Skill {id}";
+                }
                 string desc = (string?)(piDesc?.GetValue(row)) ?? "";
                 ids.Add(id); names.Add(name); descs.Add(desc);
             }
@@ -179,10 +191,13 @@ public sealed partial class Plugin
             var values = tbl.GetType().GetProperty("Values", BindingFlags.Public | BindingFlags.Instance)
                              ?.GetValue(tbl) ?? tbl;
 
-            var dIds  = new List<int>(); var dNames = new List<string>();
-            var bIds  = new List<int>(); var bNames = new List<string>();
+            // Group by display Name (exact match, first-seen order). name → group index into the parallel lists.
+            var dGroups = new BuffGroupAccumulator();
+            var bGroups = new BuffGroupAccumulator();
+            // Show-hidden uses the resolved label (game Name for real buffs, NameDesign for hidden ones) BOTH as the
+            // display name and the grouping key, so distinct hidden buffs don't collapse into one placeholder blob.
+            if (_showHidden) TranslatedBuffText.EnsureLoaded(_services.Log.Info);
             PropertyInfo? piKvp = null, piId = null, piName = null, piIcon = null, piType = null, piDesc = null;
-            var dDescs = new List<string>(); var bDescs = new List<string>();
 
             foreach (var item in SettingsReflectEnumerate(values))
             {
@@ -206,17 +221,18 @@ public sealed partial class Plugin
                 }
                 int id = (int)(piId?.GetValue(row) ?? 0);
                 if (id <= 0) continue;
-                string name = (string?)(piName?.GetValue(row)) ?? "";
+                string gameName = (string?)(piName?.GetValue(row)) ?? "";
                 string icon = (string?)(piIcon?.GetValue(row)) ?? "";
-                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(icon)) continue;
+                if (!_showHidden && (string.IsNullOrEmpty(gameName) || string.IsNullOrEmpty(icon))) continue;
                 string desc = (string?)(piDesc?.GetValue(row)) ?? "";
                 int buffType = (int)(piType?.GetValue(row) ?? -1);
-                if (buffType == 0) { dIds.Add(id); dNames.Add(name); dDescs.Add(desc); }
-                else               { bIds.Add(id); bNames.Add(name); bDescs.Add(desc); }
+                // OFF: keep today's behaviour (raw game Name). ON: resolved label for display + grouping.
+                string name = _showHidden ? TranslatedBuffText.ResolveLabel(id, gameName) : gameName;
+                (buffType == 0 ? dGroups : bGroups).Add(name, id, desc);
             }
-            _dtIds = dIds.ToArray(); _dtNames = dNames.ToArray(); _dtDescs = dDescs.ToArray(); _dtCount = dIds.Count;
-            _btIds = bIds.ToArray(); _btNames = bNames.ToArray(); _btDescs = bDescs.ToArray(); _btCount = bIds.Count;
-            _services.Log.Info($"[Settings] loaded {_dtCount} debuffs, {_btCount} buffs");
+            dGroups.Export(out _dtIds, out _dtNames, out _dtDescs, out _dtMembers, out _dtCount);
+            bGroups.Export(out _btIds, out _btNames, out _btDescs, out _btMembers, out _btCount);
+            _services.Log.Info($"[Settings] loaded {_dtCount} debuff groups, {_btCount} buff groups");
         }
         catch (Exception ex)
         {
@@ -236,15 +252,15 @@ public sealed partial class Plugin
     private void ApplyDebuffTabFilter(string text)
     {
         _dtFilter = text; _dtOffset = 0;
-        SettingsFilterTable(text, _dtIds, _dtNames, _dtDescs, _dtCount,
-            _selection.IsDebuffTracked, out _dtFiltIds, out _dtFiltNames, out _dtFiltDescs, out _dtFiltCount);
+        SettingsFilterGroups(text, _dtIds, _dtNames, _dtDescs, _dtMembers, _dtCount, _selection.IsDebuffTracked,
+            out _dtFiltIds, out _dtFiltNames, out _dtFiltDescs, out _dtFiltMembers, out _dtFiltCount);
     }
 
     private void ApplyBuffTabFilter(string text)
     {
         _btFilter = text; _btOffset = 0;
-        SettingsFilterTable(text, _btIds, _btNames, _btDescs, _btCount,
-            _selection.IsBuffTracked, out _btFiltIds, out _btFiltNames, out _btFiltDescs, out _btFiltCount);
+        SettingsFilterGroups(text, _btIds, _btNames, _btDescs, _btMembers, _btCount, _selection.IsBuffTracked,
+            out _btFiltIds, out _btFiltNames, out _btFiltDescs, out _btFiltMembers, out _btFiltCount);
     }
 
     private static void SettingsFilterTable(string text, int[] srcIds, string[] srcNames, string[] srcDescs,
@@ -270,6 +286,43 @@ public sealed partial class Plugin
         ids = trackedIds.ToArray(); names = trackedNames.ToArray(); descs = trackedDescs.ToArray(); count = ids.Length;
     }
 
+    // Grouped filter (Buffs / Debuffs): same search + tracked-floats-to-top behaviour as SettingsFilterTable,
+    // but each row is a Name-group. A group counts as "tracked" only when EVERY member id is tracked, and that
+    // predicate — not a single id — drives the sort. The member arrays are carried through so the toggle/tooltip
+    // can reach every id in the group.
+    private static void SettingsFilterGroups(string text, int[] srcIds, string[] srcNames, string[] srcDescs,
+        int[][] srcMembers, int srcCount, Func<int, bool> isTracked,
+        out int[] ids, out string[] names, out string[] descs, out int[][] members, out int count)
+    {
+        var q = text?.Trim() ?? "";
+        var ri = new List<int>(); var rn = new List<string>(); var rd = new List<string>(); var rm = new List<int[]>();
+        for (int i = 0; i < srcCount; i++)
+        {
+            if (q.Length > 0 && srcNames[i].IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0) continue;
+            ri.Add(srcIds[i]); rn.Add(srcNames[i]); rd.Add(srcDescs[i]); rm.Add(srcMembers[i]);
+        }
+        // Stable sort: fully-tracked groups float to the top.
+        var tId = new List<int>(); var tN = new List<string>(); var tD = new List<string>(); var tM = new List<int[]>();
+        var xId = new List<int>(); var xN = new List<string>(); var xD = new List<string>(); var xM = new List<int[]>();
+        for (int i = 0; i < ri.Count; i++)
+        {
+            bool all = GroupAllTracked(rm[i], isTracked);
+            if (all) { tId.Add(ri[i]); tN.Add(rn[i]); tD.Add(rd[i]); tM.Add(rm[i]); }
+            else     { xId.Add(ri[i]); xN.Add(rn[i]); xD.Add(rd[i]); xM.Add(rm[i]); }
+        }
+        tId.AddRange(xId); tN.AddRange(xN); tD.AddRange(xD); tM.AddRange(xM);
+        ids = tId.ToArray(); names = tN.ToArray(); descs = tD.ToArray(); members = tM.ToArray(); count = ids.Length;
+    }
+
+    // A group is "tracked" (toggle ON) only when every member id is tracked. A partially-tracked group — only
+    // reachable from a pre-existing per-id config — reads OFF, so one tap then selects the whole group.
+    private static bool GroupAllTracked(int[] members, Func<int, bool> isTracked)
+    {
+        if (members.Length == 0) return false;
+        for (int i = 0; i < members.Length; i++) if (!isTracked(members[i])) return false;
+        return true;
+    }
+
     // ── IL2CPP duck-typed enumerator (same as Experiment) ────────────────────
 
     private static IEnumerable<object?> SettingsReflectEnumerate(object collection)
@@ -285,5 +338,31 @@ public sealed partial class Plugin
         if (miNext == null || piCur == null) yield break;
         while ((bool)(miNext.Invoke(enumerator, null) ?? false))
             yield return piCur.GetValue(enumerator);
+    }
+
+    // Collapses per-id buff/debuff rows into Name-groups in first-seen order. The first row of a Name becomes the
+    // group's representative (id + desc, used for the icon and click-tooltip); later rows just add their id.
+    private sealed class BuffGroupAccumulator
+    {
+        private readonly Dictionary<string, int> _index = new();   // Name → group slot
+        private readonly List<int>       _ids   = new();           // representative id per group
+        private readonly List<string>    _names = new();
+        private readonly List<string>    _descs = new();           // representative desc per group
+        private readonly List<List<int>> _members = new();         // all ids sharing the Name
+
+        public void Add(string name, int id, string desc)
+        {
+            if (_index.TryGetValue(name, out int gi)) { _members[gi].Add(id); return; }
+            _index[name] = _ids.Count;
+            _ids.Add(id); _names.Add(name); _descs.Add(desc); _members.Add(new List<int> { id });
+        }
+
+        public void Export(out int[] ids, out string[] names, out string[] descs, out int[][] members, out int count)
+        {
+            ids = _ids.ToArray(); names = _names.ToArray(); descs = _descs.ToArray();
+            var m = new int[_members.Count][];
+            for (int i = 0; i < _members.Count; i++) m[i] = _members[i].ToArray();
+            members = m; count = _ids.Count;
+        }
     }
 }

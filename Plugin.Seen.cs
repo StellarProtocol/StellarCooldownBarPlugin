@@ -90,7 +90,8 @@ public sealed partial class Plugin
             bool dbPerm  = entry.Duration == 0;
             float remSec = dbPerm ? -1f : entry.RemainSec;
             float fill   = dbPerm ? 1f : Clamp01(remSec / Math.Max(0.001f, entry.Duration / 1000f));
-            _tiles[n++] = new TrackedTile(TileKind.Debuff, entry.BuffBaseId, cls.IsImagine, entry.SkillId,
+            _tiles[n++] = new TrackedTile(TileKind.Debuff, entry.BuffBaseId, cls.IsImagine,
+                entry.SkillId,
                 fill, dbPerm ? -1 : (int)(remSec * 1000f), entry.Layer, false);
         }
 

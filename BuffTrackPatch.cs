@@ -153,6 +153,7 @@ internal static partial class BuffTrackPatch
         _activeBuffs.Clear();
         _localBuffComp = _localClientBuffComp = null;
         _piShowedBuffList = null; _showedListResolved = false;
+        ResetShowHiddenCaches();
         _piBuffItemUuid = _piBuffItemBaseId = _piBuffItemLayer = _piBuffItemLevel = _piBuffItemDuration = null;
         _piBuffItemCreateTime = null;
         _buffItemFieldsResolved = false;
@@ -182,8 +183,8 @@ internal static partial class BuffTrackPatch
 
         if (_localBuffComp != null)
         {
-            if (!_showedListResolved) ResolveShowedList();
-            var list = _piShowedBuffList?.GetValue(_localBuffComp);
+            // Full (unfiltered) list when ShowHidden, else the game's display-filtered "showed" list. See Tables.cs.
+            var list = GetActiveServerList(_localBuffComp);
             if (list != null)
             {
                 try
@@ -249,17 +250,28 @@ internal static partial class BuffTrackPatch
         {
             entry = new BuffTrackEntry(uuid);
             _activeBuffs[uuid] = entry;
+        }
+        // The game frees and REUSES buff uuids across scene changes: a slot can come back as a DIFFERENT buff
+        // under the same uuid. Re-populate the identity fields whenever the baseId differs from what's cached —
+        // not only on first sight — or the new buff inherits the freed one's name/icon (e.g. a Potion showing a
+        // Cuisine identity after zoning in/out of a dungeon).
+        bool reinit = isNew || entry!.BuffBaseId != baseId;
+        if (reinit)
+        {
+            // Drop the freed buff's cached fight-source before the fallback so a stale source skill can't apply a
+            // wrong borrowed icon. A skill-sourced new buff re-populates it via the OnAddBuff/OnBuffSync postfix.
+            if (!isNew) _buffSourceSkillId.Remove(uuid);
             GetBuffInfo(baseId, out var nm, out var vis, out var bt, out var sid);
             if (sid == 0) _buffSourceSkillId.TryGetValue(uuid, out sid);
-            entry.BuffBaseId = baseId; entry.BuffName = nm;
+            entry!.BuffBaseId = baseId; entry.BuffName = nm;
             entry.Visible = vis; entry.BuffType = bt;
             entry.SkillId = sid; entry.SkillName = GetSkillName(sid);
         }
         entry!.Layer = layer; entry.Level = level;
-        // Re-snap remaining whenever the total duration OR the create time changes. A stacking buff
-        // refresh keeps the same Duration but resets CreateTime — without the CreateTime check the
+        // Re-snap remaining whenever identity changes (reinit) or the total duration / create time changes. A
+        // stacking buff refresh keeps the same Duration but resets CreateTime — without the CreateTime check the
         // timer would keep counting down from the original application and the tile would expire early.
-        if (isNew || entry.Duration != durMs || entry.CreateTime != createMs)
+        if (reinit || entry.Duration != durMs || entry.CreateTime != createMs)
         {
             entry.Duration   = durMs;
             entry.CreateTime = createMs;
@@ -275,16 +287,22 @@ internal static partial class BuffTrackPatch
         {
             entry = new BuffTrackEntry(uuid) { IsClientBuff = true };
             _activeBuffs[uuid] = entry;
+        }
+        // Reused-uuid guard, same as UpsertServerBuff: re-populate identity when the baseId changes so a recycled
+        // client-buff slot doesn't keep the freed buff's name/icon after zoning.
+        bool reinit = isNew || entry!.BuffBaseId != buffId;
+        if (reinit)
+        {
             GetBuffInfo(buffId, out var nm, out var vis, out var bt, out var sid);
-            entry.BuffBaseId = buffId; entry.BuffName = nm;
+            entry!.BuffBaseId = buffId; entry.BuffName = nm;
             entry.Visible = vis; entry.BuffType = bt;
             entry.SkillId = sid; entry.SkillName = GetSkillName(sid);
         }
         entry!.Layer = layer;
-        // Re-snap on refresh: a stacking client buff resets CreateTime (and restores BuffMaxLife) when a
-        // new stack lands, but keeps the same uuid. Mirror the server-buff handling so it doesn't expire early.
+        // Re-snap on identity change (reinit) or when a stacking client buff resets CreateTime / restores
+        // BuffMaxLife (same uuid). Mirror the server-buff handling so it doesn't expire early.
         long durMs = maxLife > 0f ? (long)(maxLife * 1000f) : 0L;
-        if (isNew || entry.CreateTime != createMs || entry.Duration != durMs)
+        if (reinit || entry.CreateTime != createMs || entry.Duration != durMs)
         {
             entry.Duration   = durMs;
             entry.CreateTime = createMs;

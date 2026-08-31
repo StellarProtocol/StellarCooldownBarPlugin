@@ -39,6 +39,26 @@ public sealed partial class Plugin
         _cfg.Save();
     }
 
+    private void SetShowHidden(bool on)
+    {
+        _showHidden = on;
+        _cfg.Set("bar.show_hidden", on);
+        _cfg.Save();
+        BuffTrackPatch.ShowHidden = on;                       // bar reads full-vs-showed buff list
+
+        // The Name/Icon filter (and the buff-group label resolution) depends on this flag, so drop the loaded
+        // picker tables and rebuild them on next access, then re-apply the active search filters so an already-open
+        // list repopulates immediately — without needing to close and reopen the settings window.
+        _buffTabLoaded = false;
+        _stBaseLoaded  = false;
+        _seenDirty     = true;
+        EnsureSkillTabLoaded();
+        EnsureBuffTabLoaded();
+        ApplySkillTabFilter(_stFilter);
+        ApplyDebuffTabFilter(_dtFilter);
+        ApplyBuffTabFilter(_btFilter);
+    }
+
     private HudElement BuildSettingsRoot()
     {
         var bgRow = new RowElement(new HudElement[]
@@ -47,6 +67,13 @@ public sealed partial class Plugin
             new SpacerElement(Width: 0f),
             new TextElement(() => $"{(int)System.Math.Round(_bgOpacity * 100)}%"),
             new SliderElement(() => _bgOpacity, SetBgOpacity) { Width = 120f },
+        }, Gap: 6f);
+
+        var showHiddenRow = new RowElement(new HudElement[]
+        {
+            new TextElement(() => _loc.T("cd.showHidden")),
+            new SpacerElement(Width: 0f),
+            new ToggleElement(() => "", () => _showHidden, SetShowHidden),
         }, Gap: 6f);
 
         var tabStrip = new RowElement(new HudElement[]
@@ -82,6 +109,9 @@ public sealed partial class Plugin
         return new ColumnElement(new HudElement[]
         {
             bgRow,
+            new SeparatorElement(),   // divide bar-appearance (above) from tracking-scope controls (below)
+            showHiddenRow,
+            new TextElement(() => _loc.T("cd.showHidden.desc")),
             new SeparatorElement(),
             new TextElement(() => _loc.T("cd.settings.subtitle"), Emphasis: true),
             tabStrip,
@@ -266,20 +296,29 @@ public sealed partial class Plugin
     private string DtLabel(int idx)
     {
         int i = _dtOffset + idx;
-        return i < _dtFiltCount ? _dtFiltNames[i] : "";
+        if (i >= _dtFiltCount) return "";
+        int n = _dtFiltMembers[i].Length;
+        // Same-name variants collapse to one row; show a "×N" badge so the count is visible. Singles show none.
+        return n > 1 ? _dtFiltNames[i] + " " + _loc.TFormat("cd.group.variants", n) : _dtFiltNames[i];
     }
 
     private bool DtTracked(int idx)
     {
         int i = _dtOffset + idx;
-        return i < _dtFiltCount && _selection.IsDebuffTracked(_dtFiltIds[i]);
+        if (i >= _dtFiltCount) return false;
+        var m = _dtFiltMembers[i];
+        // Group reads ON only when every member id is tracked (partial → OFF; one tap selects all).
+        for (int k = 0; k < m.Length; k++) if (!_selection.IsDebuffTracked(m[k])) return false;
+        return m.Length > 0;
     }
 
     private void SetDtTracked(int idx, bool on)
     {
         int i = _dtOffset + idx;
         if (i >= _dtFiltCount) return;
-        _selection.SetDebuff(_dtFiltIds[i], on);
+        var m = _dtFiltMembers[i];
+        // SetDebuff per member preserves the imagine-lockout opt-out semantics for each id.
+        for (int k = 0; k < m.Length; k++) _selection.SetDebuff(m[k], on);
         _selection.Save(_cfg);
     }
 
@@ -295,20 +334,28 @@ public sealed partial class Plugin
     private string BtLabel(int idx)
     {
         int i = _btOffset + idx;
-        return i < _btFiltCount ? _btFiltNames[i] : "";
+        if (i >= _btFiltCount) return "";
+        int n = _btFiltMembers[i].Length;
+        // Same-name variants collapse to one row; show a "×N" badge so the count is visible. Singles show none.
+        return n > 1 ? _btFiltNames[i] + " " + _loc.TFormat("cd.group.variants", n) : _btFiltNames[i];
     }
 
     private bool BtTracked(int idx)
     {
         int i = _btOffset + idx;
-        return i < _btFiltCount && _selection.IsBuffTracked(_btFiltIds[i]);
+        if (i >= _btFiltCount) return false;
+        var m = _btFiltMembers[i];
+        // Group reads ON only when every member id is tracked (partial → OFF; one tap selects all).
+        for (int k = 0; k < m.Length; k++) if (!_selection.IsBuffTracked(m[k])) return false;
+        return m.Length > 0;
     }
 
     private void SetBtTracked(int idx, bool on)
     {
         int i = _btOffset + idx;
         if (i >= _btFiltCount) return;
-        _selection.SetBuff(_btFiltIds[i], on);
+        var m = _btFiltMembers[i];
+        for (int k = 0; k < m.Length; k++) _selection.SetBuff(m[k], on);
         _selection.Save(_cfg);
     }
 }

@@ -70,11 +70,14 @@ public sealed partial class Plugin
     // Shared: position the tooltip above-right of the current cursor and show it.
     private void ShowTipAtCursor()
     {
-        const float TipW = 380f, TipH = 130f;
-        float mx = Input.mousePosition.x + 8f;
-        float my = Screen.height - Input.mousePosition.y - TipH - 8f;
-        mx = System.Math.Clamp(mx, 0f, Screen.width  - TipW);
-        my = System.Math.Clamp(my, 0f, Screen.height - TipH);
+        const float TipW = 380f, TipH = 130f;   // canvas units (match DefaultRect)
+        var fw = _services.Framework;
+        // Input.mousePosition & Screen.* are physical pixels; WindowRect is canvas units → divide by the UI scale factor.
+        float sf = fw.CanvasWidth > 0 ? (float)fw.ScreenWidth / fw.CanvasWidth : 1f;
+        float mxCanvas = Input.mousePosition.x / sf;
+        float myCanvas = (fw.ScreenHeight - Input.mousePosition.y) / sf;   // flip to top-left origin, in canvas units
+        float mx = System.Math.Clamp(mxCanvas + 8f,        0f, fw.CanvasWidth  - TipW);
+        float my = System.Math.Clamp(myCanvas - TipH - 8f, 0f, fw.CanvasHeight - TipH);
         _tipRect   = new WindowRect(mx, my, TipW, TipH);
         _tipPlaced = false;
         _tipOpen   = true;
@@ -100,8 +103,8 @@ public sealed partial class Plugin
         else
         {
             var info = _services.GameData.Combat.GetBuff(t.Id);
-            _tipName = StripTags(info?.Name);
-            _tipDesc = StripTags(info?.Description);
+            _tipName = StripTags(TranslatedBuffText.ResolveLabel(t.Id, info?.Name));
+            _tipDesc = StripTags(TranslatedBuffText.ResolveDesc(t.Id, info?.Description));
         }
         _tipTex      = TileIcon(idx);
         _tipUv       = _uv[idx];
@@ -126,9 +129,10 @@ public sealed partial class Plugin
         {
             int fi = _dtOffset + idx;
             if (fi >= _dtFiltCount) return;
-            var info = _services.GameData.Combat.GetBuff(_dtFiltIds[fi]);
-            _tipName = StripTags(info?.Name);
-            _tipDesc = StripTags(info?.Description);
+            int bid = _dtFiltIds[fi];
+            var info = _services.GameData.Combat.GetBuff(bid);
+            _tipName = StripTags(TranslatedBuffText.ResolveLabel(bid, info?.Name));
+            _tipDesc = StripTags(TranslatedBuffText.ResolveDesc(bid, info?.Description));
             _tipTex  = DtIcon(idx);
             _tipUv   = _dtUv[idx];
         }
@@ -136,9 +140,10 @@ public sealed partial class Plugin
         {
             int fi = _btOffset + idx;
             if (fi >= _btFiltCount) return;
-            var info = _services.GameData.Combat.GetBuff(_btFiltIds[fi]);
-            _tipName = StripTags(info?.Name);
-            _tipDesc = StripTags(info?.Description);
+            int bid = _btFiltIds[fi];
+            var info = _services.GameData.Combat.GetBuff(bid);
+            _tipName = StripTags(TranslatedBuffText.ResolveLabel(bid, info?.Name));
+            _tipDesc = StripTags(TranslatedBuffText.ResolveDesc(bid, info?.Description));
             _tipTex  = BtIcon(idx);
             _tipUv   = _btUv[idx];
         }

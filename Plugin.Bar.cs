@@ -51,7 +51,7 @@ public sealed partial class Plugin
                     Accent:      () => AccentColor(c),
                     IsImagine:   () => false,
                     ChargeCount: () => c < _tileCount ? _tiles[c].ChargeCount : 0)
-                { OnClick = () => OnTileClick(c) });
+                { OnClick = () => OnTileClick(c), FallbackLabel = () => Abbrev(TileName(c)) });
         }
         row1[MaxTilesPerRow] = new ConditionalElement(
             () => _rowsVisible < 2 && _totalTileCount > _tileCount,
@@ -72,7 +72,7 @@ public sealed partial class Plugin
                     Accent:      () => AccentColor(_tilesPerRow + c),
                     IsImagine:   () => false,
                     ChargeCount: () => { int ti = _tilesPerRow + c; return ti < _tileCount ? _tiles[ti].ChargeCount : 0; })
-                { OnClick = () => OnTileClick(_tilesPerRow + c) });
+                { OnClick = () => OnTileClick(_tilesPerRow + c), FallbackLabel = () => Abbrev(TileName(_tilesPerRow + c)) });
         }
         row2[MaxTilesPerRow] = new ConditionalElement(
             () => _rowsVisible == 2 && _totalTileCount > _tileCount,
@@ -93,7 +93,7 @@ public sealed partial class Plugin
                     Accent:      () => AccentColor(_tilesPerRow * 2 + c),
                     IsImagine:   () => false,
                     ChargeCount: () => { int ti = _tilesPerRow * 2 + c; return ti < _tileCount ? _tiles[ti].ChargeCount : 0; })
-                { OnClick = () => OnTileClick(_tilesPerRow * 2 + c) });
+                { OnClick = () => OnTileClick(_tilesPerRow * 2 + c), FallbackLabel = () => Abbrev(TileName(_tilesPerRow * 2 + c)) });
         }
         row3[MaxTilesPerRow] = new ConditionalElement(
             () => _rowsVisible >= 3 && _totalTileCount > _tileCount,
@@ -139,11 +139,20 @@ public sealed partial class Plugin
         if (t.Kind == TileKind.Cooldown)
             return _services.GameAssets.LoadImagineIcon(t.IconSkillId, out _uv[idx])
                 ?? _services.GameAssets.LoadSkillIcon(t.Id, out _uv[idx]);
-        // Buff/debuff: show the source skill's icon when known, fall back to the buff/debuff icon.
+        // Buff/debuff: source skill's icon when known, then a curated EffectOverride icon (for icon-less buffs with
+        // no source skill — borrows an imagine/skill icon), falling back to the buff/debuff's own icon.
         if (t.IconSkillId > 0)
-            return _services.GameAssets.LoadImagineIcon(t.IconSkillId, out _uv[idx])
-                ?? _services.GameAssets.LoadSkillIcon(t.IconSkillId, out _uv[idx])
-                ?? _services.GameAssets.LoadBuffIcon(t.Id, out _uv[idx]);
+        {
+            var bySkill = _services.GameAssets.LoadImagineIcon(t.IconSkillId, out _uv[idx])
+                       ?? _services.GameAssets.LoadSkillIcon(t.IconSkillId, out _uv[idx]);
+            if (bySkill != null) return bySkill;
+        }
+        if (TranslatedBuffText.EffectOverrides.TryGetValue(t.Id, out var ov) && ov.IconSkill > 0)
+        {
+            var byOverride = _services.GameAssets.LoadImagineIcon(ov.IconSkill, out _uv[idx])
+                          ?? _services.GameAssets.LoadSkillIcon(ov.IconSkill, out _uv[idx]);
+            if (byOverride != null) return byOverride;
+        }
         return _services.GameAssets.LoadBuffIcon(t.Id, out _uv[idx]);
     }
 
@@ -153,9 +162,38 @@ public sealed partial class Plugin
         var t = _tiles[idx];
         if (t.RemainingMs < 0) return "∞";   // permanent — no expiry
         float secs = t.RemainingMs / 1000f;
-        string time = secs >= 10f ? $"{(int)secs}s" : $"{secs:F1}s";
+        string time = secs > 999f ? $"{(int)(secs / 60f)}m"
+                    : secs >= 10f  ? $"{(int)secs}s"
+                    :                $"{secs:F1}s";
         if (t.Fallback) time = "*" + time;
         return time;
+    }
+
+    // Resolved display name for a tile — the source for the icon-less fallback badge. Skills use the game name;
+    // buffs/debuffs route through the unified translated resolver so hidden effects get a distinct NameDesign label.
+    private string TileName(int idx)
+    {
+        if (idx >= _tileCount) return "";
+        var t = _tiles[idx];
+        if (t.Kind == TileKind.Cooldown)
+            return _services.GameData.Combat.GetSkill(t.Id)?.Name ?? "";
+        return TranslatedBuffText.ResolveLabel(t.Id, _services.GameData.Combat.GetBuff(t.Id)?.Name);
+    }
+
+    // First two letter/digit characters of the (tag-stripped) name, uppercased. The framework draws this only when
+    // an effect has no icon, so normal (icon-bearing) tiles are unaffected. (Copied from TargetLens.)
+    private static string Abbrev(string name)
+    {
+        name = StripTags(name);
+        char a = '\0', b = '\0';
+        foreach (var c in name)
+        {
+            if (!char.IsLetterOrDigit(c)) continue;
+            if (a == '\0') a = char.ToUpperInvariant(c);
+            else { b = char.ToUpperInvariant(c); break; }
+        }
+        if (a == '\0') return "";
+        return b == '\0' ? a.ToString() : new string(new[] { a, b });
     }
 
     // Embedded settings-gear PNG bytes (cached). Same resource StatInspector ships; the ⚙ glyph has no in-game

@@ -24,6 +24,7 @@ public sealed partial class Plugin : IStellarPlugin
     private readonly IWindowControl _settings;
     private readonly IWindowControl _tooltip;
     private readonly IHotkeyAction _toggleAction;
+    private readonly IDisposable _launcherEntry;
 
     // Live snapshot rebuilt each tick; read by the overlay Funcs on the same main thread (no lock).
     private TrackedTile[] _tiles = Array.Empty<TrackedTile>();
@@ -33,12 +34,19 @@ public sealed partial class Plugin : IStellarPlugin
     // Bar background: black at this opacity (0 = fully transparent, 1 = fully black). Persisted in config.
     private float _bgOpacity;
 
+    // "Show hidden effects": when on, the picker lists ALL buff/skill rows (no Name/Icon filter) and the bar reads
+    // the full unfiltered buff list, so internal/icon-less effects can be tracked. Persisted in config.
+    private bool _showHidden;
+
     public Plugin(IPluginServices services)
     {
         _services = services;
         _loc = services.Localization;
         _cfg = _services.Config.GetSection("cooldownbar");
         _bgOpacity = _cfg.Get("bar.bg_opacity", 0f);
+        _showHidden = _cfg.Get("bar.show_hidden", false);
+        BuffTrackPatch.ShowHidden = _showHidden;               // full-vs-showed buff list source for the bar
+        TranslatedBuffText.EnsureLoaded(_services.Log.Info);   // English NameDesign labels (one-time lazy load)
         _selection = CooldownBarSelection.Load(_cfg);
         _attr = new DebuffAttribution(
             buffSkillId:    id => _services.GameData.Combat.GetBuff(id)?.SkillId ?? 0,
@@ -76,11 +84,23 @@ public sealed partial class Plugin : IStellarPlugin
                 SuggestedDefault: new KeyBinding(StellarKeyCode.F8)),
             callback: () => _settings.SetVisible(!_settings.IsShown));
 
+        // Launcher tile: the HUD bar is always-on in world, so the meaningful click action is opening the
+        // settings picker (the same thing F8 toggles). Title is the plugin's proper name (a literal, like
+        // sibling plugins — no catalog key needed).
+        _launcherEntry = _services.Launcher.Register(new LauncherEntry(
+            Title:   "CooldownBar",
+            IconPng: LoadIconPng(),
+            IconKey: null,
+            OnOpen:  () => _settings.SetVisible(true))
+        { Group = LauncherGroup.Plugin,
+          ShouldShow = () => _services.ClientState.Phase == GamePhase.World });
+
         _services.Framework.Update += OnUpdate;
     }
 
     public void Dispose()
     {
+        _launcherEntry.Dispose();
         _services.Framework.Update -= OnUpdate;
         SkillCDPatch.Uninstall();
         BuffTrackPatch.Uninstall();
@@ -112,5 +132,18 @@ public sealed partial class Plugin : IStellarPlugin
         }
         TickTooltipPlace();       // Plugin.Tooltip.cs — re-assert cursor rect after destroy-on-hide remount
         LogSnapshotDiag(deltaTime);   // Plugin.Diagnostics.cs — gated on STELLAR_DIAGNOSTICS
+    }
+
+    private static byte[]? LoadIconPng()
+    {
+        try
+        {
+            using var s = typeof(Plugin).Assembly.GetManifestResourceStream("Stellar.CooldownBar.cooldownbar-icon.png");
+            if (s == null) return null;
+            using var ms = new System.IO.MemoryStream();
+            s.CopyTo(ms);
+            return ms.ToArray();
+        }
+        catch { return null; }
     }
 }
