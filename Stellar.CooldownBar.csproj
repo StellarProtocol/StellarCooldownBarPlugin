@@ -27,6 +27,8 @@
     <!-- English-translated buff name/description dump (game data is Chinese). Loaded by TranslatedBuffText for the
          "Show hidden effects" feature: resolves NameDesign labels for hidden / placeholder-named buffs. -->
     <EmbeddedResource Include="Resources\BuffTable.json" LogicalName="Stellar.CooldownBar.BuffTable.json" />
+    <!-- Launcher-tile icon (read by LogicalName for the Stellar-menu entry). -->
+    <EmbeddedResource Include="Resources/cooldownbar-icon.png" LogicalName="Stellar.CooldownBar.cooldownbar-icon.png" />
   </ItemGroup>
 
   <ItemGroup>
