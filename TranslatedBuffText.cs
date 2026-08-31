@@ -29,6 +29,7 @@ internal static class TranslatedBuffText
     {
         { 2110135, ("Rolora - Active Timer", 3948) },
         { 2110111, ("Rolora - Spell",        3948) },
+        { 2110050, ("", 3957) },   // Element Stasis — no source skill of its own; borrow "Arcane! Fatal Spiral" (3957) icon
     };
 
     internal static void EnsureLoaded(Action<string>? log)
