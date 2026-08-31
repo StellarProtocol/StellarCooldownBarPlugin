@@ -162,7 +162,9 @@ public sealed partial class Plugin
         var t = _tiles[idx];
         if (t.RemainingMs < 0) return "∞";   // permanent — no expiry
         float secs = t.RemainingMs / 1000f;
-        string time = secs >= 10f ? $"{(int)secs}s" : $"{secs:F1}s";
+        string time = secs > 999f ? $"{(int)(secs / 60f)}m"
+                    : secs >= 10f  ? $"{(int)secs}s"
+                    :                $"{secs:F1}s";
         if (t.Fallback) time = "*" + time;
         return time;
     }

@@ -22,6 +22,13 @@ public sealed partial class Plugin
     private int _arrivalSeq;
     private TileComparer? _tileComparer;
 
+    // Debuffs whose BuffTable.SkillId is 0 (no auto-attribution) but that we want to render with a specific
+    // skill's artwork. Element Stasis (2110050) is the 60s re-add lockout for "Arcane! Fatal Spiral" (skill 3957).
+    private static readonly Dictionary<int, int> DebuffIconSkillOverride = new()
+    {
+        [2110050] = 3957,
+    };
+
     private int _tilesPerRow;     // tiles that fit in current width (capped at MaxTiles/MaxRows)
     private int _rowsVisible;     // rows that fit in current height (1 or MaxRows)
     private int _totalTileCount;  // raw active count before display cap (for overflow indicator)
@@ -90,7 +97,8 @@ public sealed partial class Plugin
             bool dbPerm  = entry.Duration == 0;
             float remSec = dbPerm ? -1f : entry.RemainSec;
             float fill   = dbPerm ? 1f : Clamp01(remSec / Math.Max(0.001f, entry.Duration / 1000f));
-            _tiles[n++] = new TrackedTile(TileKind.Debuff, entry.BuffBaseId, cls.IsImagine, entry.SkillId,
+            _tiles[n++] = new TrackedTile(TileKind.Debuff, entry.BuffBaseId, cls.IsImagine,
+                DebuffIconSkillOverride.TryGetValue(entry.BuffBaseId, out var iconOv) ? iconOv : entry.SkillId,
                 fill, dbPerm ? -1 : (int)(remSec * 1000f), entry.Layer, false);
         }
 
