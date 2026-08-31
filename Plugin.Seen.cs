@@ -79,7 +79,7 @@ public sealed partial class Plugin
         {
             if (n >= MaxTiles) break;
             if (entry.BuffType != 0) continue;                               // only debuffs
-            if (string.IsNullOrEmpty(entry.BuffName)) continue;
+            if (!_showHidden && entry.Hidden) continue;  // off-mode skips internal/hidden buffs (empty game Name OR empty Icon) — matches the settings list gate
             if (entry.Duration > 0 && entry.RemainSec < 0.05f) continue;
 
             var cls = ClassifyDebuff(entry);
@@ -99,7 +99,7 @@ public sealed partial class Plugin
         {
             if (n >= MaxTiles) break;
             if (entry.BuffType == 0) continue;                               // only buffs (not debuffs)
-            if (string.IsNullOrEmpty(entry.BuffName)) continue;
+            if (!_showHidden && entry.Hidden) continue;  // off-mode skips internal/hidden buffs (empty game Name OR empty Icon) — matches the settings list gate
             if (entry.Duration > 0 && entry.RemainSec < 0.05f) continue;
             bool bfInList = _selection.IsBuffTracked(entry.BuffBaseId);
             if (buffExclude ? bfInList : !bfInList) continue;

@@ -14,6 +14,7 @@ public sealed class BuffTrackEntry
     public int?   Visible      { get; internal set; }
     public int?   BuffType     { get; internal set; }   // 0=Debuff 1=Gain 2=GainRecovery 3=Item
     public bool   IsClientBuff { get; internal set; }
+    internal bool Hidden;   // true = internal/hidden buff (empty game Name OR empty Icon); off-mode bar skips these
     public int    Layer        { get; internal set; }
     public int    Level        { get; internal set; }
     public int    SkillId      { get; internal set; }
@@ -168,7 +169,7 @@ internal static partial class BuffTrackPatch
         _fightSourceResolved = false;
         _tableReflResolved = false;
         _miGetBuffTable = _miGetBuffRow = null; _buffTableInst = null;
-        _piBuffRowName = _piBuffRowVisible = _piBuffRowType = _piBuffRowSkillId = null;
+        _piBuffRowName = _piBuffRowIcon = _piBuffRowVisible = _piBuffRowType = _piBuffRowSkillId = null;
         _skillTableResolved = false;
         _skillTableInst = null; _miGetSkillRow = null; _piSkillRowName = null;
         _loggedError = _diagLogged = false;
@@ -261,9 +262,9 @@ internal static partial class BuffTrackPatch
             // Drop the freed buff's cached fight-source before the fallback so a stale source skill can't apply a
             // wrong borrowed icon. A skill-sourced new buff re-populates it via the OnAddBuff/OnBuffSync postfix.
             if (!isNew) _buffSourceSkillId.Remove(uuid);
-            GetBuffInfo(baseId, out var nm, out var vis, out var bt, out var sid);
+            GetBuffInfo(baseId, out var nm, out var vis, out var bt, out var sid, out var hidden);
             if (sid == 0) _buffSourceSkillId.TryGetValue(uuid, out sid);
-            entry!.BuffBaseId = baseId; entry.BuffName = nm;
+            entry!.BuffBaseId = baseId; entry.BuffName = nm; entry.Hidden = hidden;
             entry.Visible = vis; entry.BuffType = bt;
             entry.SkillId = sid; entry.SkillName = GetSkillName(sid);
         }
@@ -295,8 +296,8 @@ internal static partial class BuffTrackPatch
         bool reinit = isNew || entry!.BuffBaseId != buffId;
         if (reinit)
         {
-            GetBuffInfo(buffId, out var nm, out var vis, out var bt, out var sid);
-            entry!.BuffBaseId = buffId; entry.BuffName = nm;
+            GetBuffInfo(buffId, out var nm, out var vis, out var bt, out var sid, out var hidden);
+            entry!.BuffBaseId = buffId; entry.BuffName = nm; entry.Hidden = hidden;
             entry.Visible = vis; entry.BuffType = bt;
             entry.SkillId = sid; entry.SkillName = GetSkillName(sid);
         }
