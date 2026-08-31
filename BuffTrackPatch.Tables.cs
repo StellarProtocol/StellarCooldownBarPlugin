@@ -101,6 +101,7 @@ internal static partial class BuffTrackPatch
     private static object?       _buffTableInst;
     private static MethodInfo?   _miGetBuffRow;
     private static PropertyInfo? _piBuffRowName;
+    private static PropertyInfo? _piBuffRowIcon;
     private static PropertyInfo? _piBuffRowVisible;
     private static PropertyInfo? _piBuffRowType;
     private static PropertyInfo? _piBuffRowSkillId;
@@ -111,23 +112,28 @@ internal static partial class BuffTrackPatch
     private static PropertyInfo? _piSkillRowName;
     private static bool          _skillTableResolved;
 
-    private static void GetBuffInfo(int baseId, out string name, out int? visible, out int? buffType, out int skillId)
+    private static void GetBuffInfo(int baseId, out string name, out int? visible, out int? buffType, out int skillId, out bool hidden)
     {
-        name = ""; visible = null; buffType = null; skillId = 0;
+        name = ""; visible = null; buffType = null; skillId = 0; hidden = false;
         if (!_tableReflResolved) ResolveBuffTable();
-        if (_miGetBuffRow == null || _buffTableInst == null) return;
+        if (_miGetBuffRow == null || _buffTableInst == null) return;   // table not ready → leave hidden=false so real buffs aren't hidden by a transient miss
         try
         {
             var row = _miGetBuffRow.Invoke(_buffTableInst, new object[] { (object)baseId });
-            if (row == null) return;
+            if (row == null) return;                                    // row not resolvable → hidden stays false (bias to NOT hiding)
             var t = row.GetType();
             _piBuffRowName    ??= t.GetProperty("Name",     BindingFlags.Public | BindingFlags.Instance);
+            _piBuffRowIcon    ??= t.GetProperty("Icon",     BindingFlags.Public | BindingFlags.Instance);
             _piBuffRowVisible ??= t.GetProperty("Visible",  BindingFlags.Public | BindingFlags.Instance);
             _piBuffRowType    ??= t.GetProperty("BuffType", BindingFlags.Public | BindingFlags.Instance);
             _piBuffRowSkillId ??= t.GetProperty("SkillId",  BindingFlags.Public | BindingFlags.Instance);
             // Resolve to the translated display label (game Name for real buffs, NameDesign for hidden / placeholder-
-            // named ones) so a hidden buff's BuffName is never empty — the bar's empty-name render gate then passes.
+            // named ones) so a hidden buff's BuffName is never empty. The hidden flag — NOT the (never-empty) label —
+            // is what the bar's off-mode gate uses; compute it from the RAW row exactly like the settings list does
+            // (empty game Name OR empty Icon = an internal/hidden buff that off-mode must not render).
             string gameName = (string?)(_piBuffRowName?.GetValue(row)) ?? "";
+            string icon     = (string?)(_piBuffRowIcon?.GetValue(row)) ?? "";
+            hidden   = string.IsNullOrEmpty(gameName) || string.IsNullOrEmpty(icon);
             name     = TranslatedBuffText.ResolveLabel(baseId, gameName);
             visible  = (int?)(_piBuffRowVisible?.GetValue(row));
             buffType = (int?)(_piBuffRowType?.GetValue(row));
