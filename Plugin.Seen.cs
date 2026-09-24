@@ -127,8 +127,25 @@ public sealed partial class Plugin
         if (!cls.IsImagine && entry.SkillId > 0
             && _services.ResonanceData.GetImagineForSkill(entry.SkillId) is not null)
             cls = new DebuffAttribution.Result(true, entry.SkillId);
+        // Curated fallback for known player-arcane lockouts (Mechanical Failure / Element Stasis): their
+        // BuffTable carries SkillId 0 + the generic abnormal icon and the live FightSourceInfo source resolves
+        // to a slot-[0] summon variant GetImagineForSkill can't map, so point at the base [7,8] arcane the debuff
+        // locks out (owner 2026-09-24). Same map CombatMeter uses; a shared framework resolver is the eventual home.
+        if (!cls.IsImagine && LockoutArcaneSkill(entry.BuffBaseId) is { } lk
+            && _services.ResonanceData.GetImagineForSkill(lk) is not null)
+            cls = new DebuffAttribution.Result(true, lk);
         return cls;
     }
+
+    // Imagine-lockout debuff base id -> the base Battle-Imagine skill it locks out. These debuffs have
+    // BuffTable.SkillId 0 and only name the arcane in localized Desc text (no locale-independent static link);
+    // the mapped ids are slot-[7,8] arcanes GetImagineForSkill resolves to a card. Extend as new arcanes appear.
+    private static int? LockoutArcaneSkill(int buffBaseId) => buffBaseId switch
+    {
+        2110049 => 3971,   // Mechanical Failure -> "Arcane! Superconductor Surge"
+        2110050 => 3957,   // Element Stasis     -> "Arcane! Fatal Spiral"
+        _ => null,
+    };
 
     private int ComputeTilesPerRow()
     {
