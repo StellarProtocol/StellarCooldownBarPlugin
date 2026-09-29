@@ -35,8 +35,8 @@ public sealed partial class Plugin
         {
             if (entry.BuffType != 0) continue;
             debCount++;
-            var cls = _attr.Classify(entry.BuffBaseId);
-            _services.Log.Info($"[CooldownBar][diag]  debuff base={entry.BuffBaseId} '{entry.BuffName}' src={entry.SkillId} imagine={cls.IsImagine} rem={entry.RemainSec:F1}s tracked={_selection.IsDebuffTracked(entry.BuffBaseId)}");
+            var cls = _attr.Classify(entry.BuffBaseId, entry.SkillId);
+            _services.Log.Info($"[CooldownBar][diag]  debuff base={entry.BuffBaseId} '{entry.BuffName}' src={entry.SkillId} imagine={cls.IsImagine} card={cls.ImagineSkillId} rem={entry.RemainSec:F1}s tracked={_selection.IsDebuffTracked(entry.BuffBaseId)}");
         }
         _services.Log.Info($"[CooldownBar][diag] active debuffs={debCount}");
     }

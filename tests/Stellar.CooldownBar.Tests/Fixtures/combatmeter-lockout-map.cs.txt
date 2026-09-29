@@ -1,0 +1,9 @@
+// VERBATIM COPY of CombatMeter's curated imagine-lockout map — DO NOT EDIT BY HAND.
+// Source: StellarProtocol/StellarCombatMeterPlugin origin/main 6c3538c569c7d3dff441613fb2c9113b72057bf1, Plugin.Debuffs.cs
+// Refresh: git -C plugin-repos/StellarCombatMeterPlugin show origin/main:Plugin.Debuffs.cs | sed -n '/private static int? LockoutArcaneSkill/,/^    };/p'
+    private static int? LockoutArcaneSkill(int buffBaseId) => buffBaseId switch
+    {
+        2110049 => 3971,   // Mechanical Failure -> "Arcane! Superconductor Surge"
+        2110050 => 3957,   // Element Stasis     -> "Arcane! Fatal Spiral"
+        _ => null,
+    };

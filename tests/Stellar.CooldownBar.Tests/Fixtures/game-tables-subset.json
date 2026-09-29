@@ -1,0 +1,92 @@
+{
+ "skills": [
+  {
+   "Id": 3971,
+   "Name": "Arcane! Superconductor Surge",
+   "SlotPositionId": [
+    7,
+    8
+   ]
+  },
+  {
+   "Id": 111069,
+   "Name": "Arcane! Superconductor Surge",
+   "SlotPositionId": [
+    0
+   ]
+  },
+  {
+   "Id": 3957,
+   "Name": "Arcane! Fatal Spiral",
+   "SlotPositionId": [
+    7,
+    8
+   ]
+  },
+  {
+   "Id": 1100740,
+   "Name": "Arcane! Fatal Spiral",
+   "SlotPositionId": [
+    0
+   ]
+  },
+  {
+   "Id": 3921,
+   "Name": "Arcane! Time Decree",
+   "SlotPositionId": [
+    7,
+    8
+   ]
+  },
+  {
+   "Id": 2900340,
+   "Name": "Arcane! Time Decree",
+   "SlotPositionId": [
+    7,
+    8
+   ]
+  },
+  {
+   "Id": 3911,
+   "Name": "Arcane! Heart of Flame",
+   "SlotPositionId": [
+    7,
+    8
+   ]
+  }
+ ],
+ "buffs": [
+  {
+   "Id": 2110049,
+   "Name": "Mechanical Failure",
+   "SkillId": 0,
+   "BuffType": 0,
+   "Icon": "ui/atlas/debuff/buff_abnormal_icon_02",
+   "Desc": "During this period, \"Arcane! Superconductor Surge\" cannot be applied again."
+  },
+  {
+   "Id": 2110050,
+   "Name": "Element Stasis",
+   "SkillId": 0,
+   "BuffType": 0,
+   "Icon": "ui/atlas/debuff/buff_abnormal_icon_02",
+   "Desc": "During this period, \"Arcane! Fatal Spiral\" cannot be added again"
+  },
+  {
+   "Id": 2110056,
+   "Name": "Time Stasis",
+   "SkillId": 0,
+   "BuffType": 0,
+   "Icon": "ui/atlas/debuff/buff_abnormal_icon_02",
+   "Desc": "During this period, \"Arcane! Time Acceleration Decree\" cannot be added again"
+  },
+  {
+   "Id": 2110069,
+   "Name": "Tetanus",
+   "SkillId": 0,
+   "BuffType": 0,
+   "Icon": "ui/atlas/hud/debuff/buff_red_def",
+   "Desc": "Healing received -100% throughout the duration"
+  }
+ ]
+}
