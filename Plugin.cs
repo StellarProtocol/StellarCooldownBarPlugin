@@ -50,7 +50,7 @@ public sealed partial class Plugin : IStellarPlugin
         _selection = CooldownBarSelection.Load(_cfg);
         _attr = new DebuffAttribution(
             buffSkillId:    id => _services.GameData.Combat.GetBuff(id)?.SkillId ?? 0,
-            isImagineSkill: sk => _services.ResonanceData.GetImagineForSkill(sk) is not null);
+            imagineSkillOf: sk => _services.ResonanceData.GetImagineForSkill(sk)?.SkillId ?? 0);
         _tiles = new TrackedTile[MaxTiles];
         SkillCDPatch.Install(_services.Harmony.Create("skillcd"), _services.Log.Info);
         BuffTrackPatch.Install(_services.Harmony.Create("buff"), _services.Log.Info);
