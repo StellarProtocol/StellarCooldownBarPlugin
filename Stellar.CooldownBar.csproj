@@ -9,7 +9,7 @@
     <NoWarn>CS8632;CS8765</NoWarn>
     <RootNamespace>Stellar.CooldownBar</RootNamespace>
     <AssemblyName>Stellar.CooldownBar</AssemblyName>
-    <Version>2.2.4</Version>
+    <Version>2.3.0</Version>
     <Deterministic>true</Deterministic>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
@@ -37,6 +37,7 @@
     <EmbeddedResource Include="Lang/th.json" LogicalName="Stellar.CooldownBar.Lang.th.json" />
     <EmbeddedResource Include="Lang/id.json" LogicalName="Stellar.CooldownBar.Lang.id.json" />
     <EmbeddedResource Include="Lang/fil.json" LogicalName="Stellar.CooldownBar.Lang.fil.json" />
+    <EmbeddedResource Include="Lang/ko.json" LogicalName="Stellar.CooldownBar.Lang.ko.json" />
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="tests/**/*.cs" />
