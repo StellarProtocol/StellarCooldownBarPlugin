@@ -17,5 +17,6 @@
   "cd.showHidden.desc": "名前やアイコンのない内部バフも一覧・表示する",
   "cd.tab.buffs": "バフ",
   "cd.tab.debuffs": "デバフ",
-  "cd.tab.skills": "スキル"
+  "cd.tab.skills": "スキル",
+  "cd.window.title": "CooldownBar"
 }

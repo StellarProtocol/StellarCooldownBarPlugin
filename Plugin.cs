@@ -60,7 +60,7 @@ public sealed partial class Plugin : IStellarPlugin
         _bar = _services.Windows.Register(new WindowRegistration(
             new WindowSpec(
                 Id:          "cooldownbar.main",
-                Title:       "CooldownBar",
+                Title:       _loc.T("cd.window.title"),
                 DefaultRect: new WindowRect(897f, 940f, 320f, 130f),
                 Category:    WindowCategory.HUD,
                 Style:       WindowPanelStyle.Borderless)

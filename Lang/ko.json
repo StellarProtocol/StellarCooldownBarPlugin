@@ -17,5 +17,6 @@
   "cd.showHidden.desc": "이름이나 아이콘이 없는 내부 버프를 목록에 표시",
   "cd.tab.buffs": "버프",
   "cd.tab.debuffs": "디버프",
-  "cd.tab.skills": "스킬"
+  "cd.tab.skills": "스킬",
+  "cd.window.title": "CooldownBar"
 }

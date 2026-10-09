@@ -17,5 +17,6 @@
   "cd.showHidden.desc": "Ilista at ipakita ang mga internal na buff na walang pangalan o icon",
   "cd.tab.buffs": "Buffs",
   "cd.tab.debuffs": "Debuffs",
-  "cd.tab.skills": "Skills"
+  "cd.tab.skills": "Skills",
+  "cd.window.title": "CooldownBar"
 }
