@@ -8,6 +8,7 @@
   "cd.filterMode": "โหมดกรอง",
   "cd.group.variants": "×{0}",
   "cd.hotkey.toggle": "สลับการตั้งค่า CooldownBar",
+  "cd.launcher.title": "CooldownBar",
   "cd.mode.excludeSelected": "แสดงทั้งหมด ยกเว้นที่เลือก",
   "cd.mode.onlySelected": "แสดงเฉพาะที่เลือก",
   "cd.settings.subtitle": "สลับสิ่งที่แสดงบน CooldownBar",
@@ -16,5 +17,6 @@
   "cd.showHidden.desc": "แสดงรายการและแสดงบัฟภายในที่ไม่มีชื่อหรือไอคอน",
   "cd.tab.buffs": "บัฟ",
   "cd.tab.debuffs": "ดีบัฟ",
-  "cd.tab.skills": "สกิล"
+  "cd.tab.skills": "สกิล",
+  "cd.window.title": "CooldownBar"
 }

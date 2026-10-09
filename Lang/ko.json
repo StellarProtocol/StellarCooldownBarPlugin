@@ -1,0 +1,22 @@
+{
+  "cd.barBackground": "바 배경",
+  "cd.barTitle": "쿨타임",
+  "cd.count.buffs": "버프 {0} / {1}",
+  "cd.count.debuffs": "디버프 {0} / {1}",
+  "cd.count.skills": "스킬 {0} / {1}",
+  "cd.empty": "활성 쿨타임 없음 — 표시할 항목을 선택하려면 우측 상단 톱니바퀴를 클릭하세요",
+  "cd.filterMode": "필터 모드",
+  "cd.group.variants": "×{0}",
+  "cd.hotkey.toggle": "쿨타임 바 설정 전환",
+  "cd.launcher.title": "쿨타임 바",
+  "cd.mode.excludeSelected": "선택한 항목 제외 모두 표시",
+  "cd.mode.onlySelected": "선택한 항목만 표시",
+  "cd.settings.subtitle": "쿨타임 바에 표시할 항목 선택",
+  "cd.settings.title": "쿨타임 바 — 추적",
+  "cd.showHidden": "숨겨진 효과 표시 (실험 기능)",
+  "cd.showHidden.desc": "이름이나 아이콘이 없는 내부 버프를 목록에 표시",
+  "cd.tab.buffs": "버프",
+  "cd.tab.debuffs": "디버프",
+  "cd.tab.skills": "스킬",
+  "cd.window.title": "쿨타임 바"
+}

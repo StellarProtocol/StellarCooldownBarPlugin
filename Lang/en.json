@@ -8,6 +8,7 @@
   "cd.filterMode": "Filter mode",
   "cd.group.variants": "×{0}",
   "cd.hotkey.toggle": "Toggle CooldownBar settings",
+  "cd.launcher.title": "CooldownBar",
   "cd.mode.excludeSelected": "Show all, exclude selected",
   "cd.mode.onlySelected": "Show only selected",
   "cd.settings.subtitle": "Toggle what appears on the CooldownBar",
@@ -16,5 +17,6 @@
   "cd.showHidden.desc": "List and display internal buffs that have no name or icon",
   "cd.tab.buffs": "Buffs",
   "cd.tab.debuffs": "Debuffs",
-  "cd.tab.skills": "Skills"
+  "cd.tab.skills": "Skills",
+  "cd.window.title": "CooldownBar"
 }

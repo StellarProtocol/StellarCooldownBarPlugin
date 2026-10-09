@@ -60,7 +60,7 @@ public sealed partial class Plugin : IStellarPlugin
         _bar = _services.Windows.Register(new WindowRegistration(
             new WindowSpec(
                 Id:          "cooldownbar.main",
-                Title:       "CooldownBar",
+                Title:       _loc.T("cd.window.title"),
                 DefaultRect: new WindowRect(897f, 940f, 320f, 130f),
                 Category:    WindowCategory.HUD,
                 Style:       WindowPanelStyle.Borderless)
@@ -85,14 +85,17 @@ public sealed partial class Plugin : IStellarPlugin
             callback: () => _settings.SetVisible(!_settings.IsShown));
 
         // Launcher tile: the HUD bar is always-on in world, so the meaningful click action is opening the
-        // settings picker (the same thing F8 toggles). Title is the plugin's proper name (a literal, like
-        // sibling plugins — no catalog key needed).
+        // settings picker (the same thing F8 toggles). Title stays the fixed literal "CooldownBar" — the
+        // stable pin-identity key (ILauncher.cs:49-50) — so a pinned tile survives a language change;
+        // TitleProvider carries the live-localized display text.
         _launcherEntry = _services.Launcher.Register(new LauncherEntry(
             Title:   "CooldownBar",
             IconPng: LoadIconPng(),
             IconKey: null,
             OnOpen:  () => _settings.SetVisible(true))
         { Group = LauncherGroup.Plugin,
+          // Re-localize the tile DISPLAY on a language change; Title above never changes (pin identity).
+          TitleProvider = () => _loc.T("cd.launcher.title"),
           ShouldShow = () => _services.ClientState.Phase == GamePhase.World });
 
         _services.Framework.Update += OnUpdate;

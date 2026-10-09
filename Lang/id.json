@@ -8,6 +8,7 @@
   "cd.filterMode": "Mode filter",
   "cd.group.variants": "×{0}",
   "cd.hotkey.toggle": "Alihkan pengaturan CooldownBar",
+  "cd.launcher.title": "CooldownBar",
   "cd.mode.excludeSelected": "Tampilkan semua, kecuali yang dipilih",
   "cd.mode.onlySelected": "Tampilkan hanya yang dipilih",
   "cd.settings.subtitle": "Alihkan apa yang tampil di CooldownBar",
@@ -16,5 +17,6 @@
   "cd.showHidden.desc": "Cantumkan dan tampilkan buff internal yang tidak memiliki nama atau ikon",
   "cd.tab.buffs": "Buff",
   "cd.tab.debuffs": "Debuff",
-  "cd.tab.skills": "Skill"
+  "cd.tab.skills": "Skill",
+  "cd.window.title": "CooldownBar"
 }
