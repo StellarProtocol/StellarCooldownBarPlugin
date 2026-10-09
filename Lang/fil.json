@@ -8,6 +8,7 @@
   "cd.filterMode": "Mode ng filter",
   "cd.group.variants": "×{0}",
   "cd.hotkey.toggle": "I-toggle ang mga setting ng CooldownBar",
+  "cd.launcher.title": "CooldownBar",
   "cd.mode.excludeSelected": "Ipakita lahat, alisin ang napili",
   "cd.mode.onlySelected": "Ipakita ang napili lamang",
   "cd.settings.subtitle": "I-toggle kung ano ang lalabas sa CooldownBar",

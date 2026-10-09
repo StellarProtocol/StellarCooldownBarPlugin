@@ -8,6 +8,7 @@
   "cd.filterMode": "Filter mode",
   "cd.group.variants": "×{0}",
   "cd.hotkey.toggle": "Toggle CooldownBar settings",
+  "cd.launcher.title": "CooldownBar",
   "cd.mode.excludeSelected": "Show all, exclude selected",
   "cd.mode.onlySelected": "Show only selected",
   "cd.settings.subtitle": "Toggle what appears on the CooldownBar",

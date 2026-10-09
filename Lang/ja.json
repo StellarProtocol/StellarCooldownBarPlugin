@@ -8,6 +8,7 @@
   "cd.filterMode": "フィルターモード",
   "cd.group.variants": "×{0}",
   "cd.hotkey.toggle": "CooldownBar設定の切替",
+  "cd.launcher.title": "CooldownBar",
   "cd.mode.excludeSelected": "すべて表示、選択を除外",
   "cd.mode.onlySelected": "選択したもののみ表示",
   "cd.settings.subtitle": "CooldownBarに表示する項目を切替",
