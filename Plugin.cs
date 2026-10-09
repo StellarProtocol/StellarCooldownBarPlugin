@@ -85,14 +85,16 @@ public sealed partial class Plugin : IStellarPlugin
             callback: () => _settings.SetVisible(!_settings.IsShown));
 
         // Launcher tile: the HUD bar is always-on in world, so the meaningful click action is opening the
-        // settings picker (the same thing F8 toggles).
+        // settings picker (the same thing F8 toggles). Title stays the fixed literal "CooldownBar" — the
+        // stable pin-identity key (ILauncher.cs:49-50) — so a pinned tile survives a language change;
+        // TitleProvider carries the live-localized display text.
         _launcherEntry = _services.Launcher.Register(new LauncherEntry(
-            Title:   _loc.T("cd.launcher.title"),
+            Title:   "CooldownBar",
             IconPng: LoadIconPng(),
             IconKey: null,
             OnOpen:  () => _settings.SetVisible(true))
         { Group = LauncherGroup.Plugin,
-          // Re-localize the tile title live on a language change (Title alone is a captured string).
+          // Re-localize the tile DISPLAY on a language change; Title above never changes (pin identity).
           TitleProvider = () => _loc.T("cd.launcher.title"),
           ShouldShow = () => _services.ClientState.Phase == GamePhase.World });
 
