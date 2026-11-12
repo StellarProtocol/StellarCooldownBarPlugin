@@ -117,21 +117,27 @@ public sealed partial class Plugin : IStellarPlugin
     }
 
     private float _rebuildAccum;
-    private const float RebuildIntervalS = 1f / 60f;   // cap buff/CD data refresh at 60Hz (smooth; still caps on high-fps setups)
+    // Game reads (buff list walk + CD queries) at 10 Hz. The bar still moves smoothly: the overlay Funcs extrapolate each
+    // tile's sample every frame (TrackedTile.RemainAt / Plugin.Smooth.cs). The demand window (500 ms) stays > 100 ms,
+    // so the postfixes stay awake between reads. (The old 1/60 s cap never engaged: OnUpdate arrives at ~30 Hz.)
+    private const float RebuildIntervalS = 0.1f;
 
     private void OnUpdate(float deltaTime)
     {
         var perfUpdate = CdPerf.Begin();   // Plugin.Perf.cs — default (no Stopwatch read) unless the probe is on
-        // Only read buff/CD state when the bar is actually visible, and at ~60Hz — not every frame.
-        // RefreshActiveBuffs rebuilds collections + walks the buff lists via reflection; running it every
-        // frame (even while the bar is hidden) was a steady combat-time GC source. The window's Funcs still
-        // draw every frame from the last-built _tiles, so the bar stays smooth; only the data refresh throttles.
+        // Only read buff/CD state when the bar is actually visible, and at 10 Hz — not every frame.
+        // RefreshActiveBuffs walks the buff lists via reflection; running it every frame (even while the bar is
+        // hidden) was a steady combat-time GC source. The window's Funcs still draw every frame from the last-built
+        // _tiles samples, so the bar stays smooth; only the data refresh throttles.
         if (_bar.IsShown && !_perfOff)
         {
             _rebuildAccum += deltaTime;
             if (_rebuildAccum >= RebuildIntervalS)
             {
-                _rebuildAccum = 0f;
+                // Carry the remainder so ~30 Hz ticks still average 10 reads/s (a reset to 0 would give 7.5 Hz);
+                // clamp after a long stall so we don't fire a burst of catch-up reads.
+                _rebuildAccum -= RebuildIntervalS;
+                if (_rebuildAccum > RebuildIntervalS) _rebuildAccum = 0f;
                 var perfRefresh = CdPerf.Begin();
                 BuffTrackPatch.MarkDemand();   // keep the per-entity buff/CD postfixes awake only while refreshing
                 SkillCDPatch.MarkDemand();

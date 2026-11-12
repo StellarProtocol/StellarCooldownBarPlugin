@@ -47,7 +47,7 @@ public sealed partial class Plugin
                 new CooldownTileElement(
                     Icon:        P(() => TileIcon(c)),
                     Uv:          P(() => _uv[c]),
-                    Fill01:      P(() => c < _tileCount ? _tiles[c].Fill01 : 0f),
+                    Fill01:      P(() => TileFill(c)),
                     Seconds:     P(() => SecondsLabel(c)),
                     Accent:      P(() => AccentColor(c)),
                     IsImagine:   P(() => false),
@@ -68,7 +68,7 @@ public sealed partial class Plugin
                 new CooldownTileElement(
                     Icon:        P(() => TileIcon(_tilesPerRow + c)),
                     Uv:          P(() => _uv[_tilesPerRow + c]),
-                    Fill01:      P(() => { int ti = _tilesPerRow + c; return ti < _tileCount ? _tiles[ti].Fill01 : 0f; }),
+                    Fill01:      P(() => TileFill(_tilesPerRow + c)),
                     Seconds:     P(() => SecondsLabel(_tilesPerRow + c)),
                     Accent:      P(() => AccentColor(_tilesPerRow + c)),
                     IsImagine:   P(() => false),
@@ -89,7 +89,7 @@ public sealed partial class Plugin
                 new CooldownTileElement(
                     Icon:        P(() => TileIcon(_tilesPerRow * 2 + c)),
                     Uv:          P(() => _uv[_tilesPerRow * 2 + c]),
-                    Fill01:      P(() => { int ti = _tilesPerRow * 2 + c; return ti < _tileCount ? _tiles[ti].Fill01 : 0f; }),
+                    Fill01:      P(() => TileFill(_tilesPerRow * 2 + c)),
                     Seconds:     P(() => SecondsLabel(_tilesPerRow * 2 + c)),
                     Accent:      P(() => AccentColor(_tilesPerRow * 2 + c)),
                     IsImagine:   P(() => false),
@@ -157,12 +157,23 @@ public sealed partial class Plugin
         return _services.GameAssets.LoadBuffIcon(t.Id, out _uv[idx]);
     }
 
+    // Per-frame fill, extrapolated from the tile's last 10 Hz sample (TrackedTile.FillAt). Quantized to 1/88 (half a
+    // canvas px of the 44 px foot bar — invisible) so a slow timer doesn't re-mesh its tile every frame
+    // (Plugin-Performance-Rules.md §5: the tile's graphic only changes when the shown fill moves).
+    private const float FillSteps = 88f;
+    private float TileFill(int idx)
+    {
+        if (idx >= _tileCount) return 0f;
+        return MathF.Round(_tiles[idx].FillAt(Environment.TickCount64) * FillSteps) / FillSteps;
+    }
+
     private string SecondsLabel(int idx)
     {
         if (idx >= _tileCount) return "";
         var t = _tiles[idx];
-        if (t.RemainingMs < 0) return "∞";   // permanent — no expiry
-        float secs = t.RemainingMs / 1000f;
+        if (t.Permanent) return "∞";   // permanent — no expiry
+        // Truncate to whole ms like the old (int)(rem * 1000) snapshot so the formatted value is unchanged.
+        float secs = (int)(t.RemainAt(Environment.TickCount64) * 1000f) / 1000f;
         string time = secs > 999f ? $"{(int)(secs / 60f)}m"
                     : secs >= 10f  ? $"{(int)secs}s"
                     :                $"{secs:F1}s";

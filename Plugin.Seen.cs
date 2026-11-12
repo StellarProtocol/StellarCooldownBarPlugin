@@ -54,6 +54,8 @@ public sealed partial class Plugin
     {
         BuffTrackPatch.RefreshActiveBuffs();
         int n = 0;
+        long now = Environment.TickCount64;   // the bar's one clock (TrackedTile.SampleTick, BuffTrackEntry.SnapTick)
+        _cdGen++;                             // Plugin.Smooth.cs — stamps live cooldown state; the rest is pruned below
 
         bool skillExclude  = _selection.SkillMode  == TrackMode.ExcludeBelow;
         bool debuffExclude = _selection.DebuffMode == TrackMode.ExcludeBelow;
@@ -69,11 +71,12 @@ public sealed partial class Plugin
             if (skillExclude ? inList : !inList) continue;
             float rem = SkillCDPatch.GetRemainSec(entry);
             if (rem <= 0f) continue;
-            float fill     = Clamp01(1f - rem / Math.Max(0.001f, entry.TotalSec));
+            SampleCooldown(entry, rem, now, out float disp, out float rate);   // Plugin.Smooth.cs — measured rate, never-go-up
             bool isImagine = entry.MaxCharges > 1;
             _tiles[n++] = new TrackedTile(TileKind.Cooldown, baseId, isImagine, baseId,
-                fill, (int)(rem * 1000f), isImagine ? entry.PendingCharges : 0, false);
+                disp, now, entry.TotalSec, rate, isImagine ? entry.PendingCharges : 0, false);
         }
+        PruneCdSmooth();
 
         foreach (var entry in BuffTrackPatch.ActiveBuffs.Values)
         {
@@ -87,14 +90,13 @@ public sealed partial class Plugin
             bool dbInList = _selection.IsDebuffTracked(entry.BuffBaseId);
             if (debuffExclude ? dbInList : !dbInList) continue;
 
-            bool dbPerm  = entry.Duration == 0;
-            float remSec = dbPerm ? -1f : entry.RemainSec;
-            float fill   = dbPerm ? 1f : Clamp01(remSec / Math.Max(0.001f, entry.Duration / 1000f));
             // Icon skill = the resolved Battle-Imagine CARD for a lockout (e.g. Mechanical Failure -> 3971), else the
             // live source skill. Passing entry.SkillId for a lockout drew the generic debuff icon (2.2.3 bug).
+            // Sample = the entry's own server-clock snap (SnapRemain at SnapTick), drained at exactly 1.0 — the same
+            // extrapolation BuffTrackEntry.RemainSec does, now evaluated per frame by the Funcs.
             _tiles[n++] = new TrackedTile(TileKind.Debuff, entry.BuffBaseId, cls.IsImagine,
                 DebuffAttribution.TileIconSkill(cls, entry.SkillId),
-                fill, dbPerm ? -1 : (int)(remSec * 1000f), entry.Layer, false);
+                BuffSample(entry), entry.SnapTick, entry.Duration / 1000f, 1f, entry.Layer, false);
         }
 
         foreach (var entry in BuffTrackPatch.ActiveBuffs.Values)
@@ -106,11 +108,8 @@ public sealed partial class Plugin
             bool bfInList = _selection.IsBuffTracked(entry.BuffBaseId);
             if (buffExclude ? bfInList : !bfInList) continue;
 
-            bool bfPerm   = entry.Duration == 0;
-            float bRemSec = bfPerm ? -1f : entry.RemainSec;
-            float bFill   = bfPerm ? 1f : Clamp01(bRemSec / Math.Max(0.001f, entry.Duration / 1000f));
             _tiles[n++] = new TrackedTile(TileKind.Buff, entry.BuffBaseId, false, entry.SkillId,
-                bFill, bfPerm ? -1 : (int)(bRemSec * 1000f), entry.Layer, false);
+                BuffSample(entry), entry.SnapTick, entry.Duration / 1000f, 1f, entry.Layer, false);
         }
 
         UpdateArrivalOrder(n);
@@ -141,7 +140,8 @@ public sealed partial class Plugin
         return Math.Min(MaxRows, Math.Max(1, (int)((h - BaseH) / (TileRowH + TileVGap)) + 1));
     }
 
-    private static float Clamp01(float v) => v < 0f ? 0f : v > 1f ? 1f : v;
+    // A buff/debuff tile's sample: -1 = permanent (Duration 0), else SnapRemain (remaining at SnapTick).
+    private static float BuffSample(BuffTrackEntry e) => e.Duration == 0 ? -1f : (e.SnapRemain < 0f ? 0f : e.SnapRemain);
 
     // Memoize success only — table may finish loading after first CD arrives.
     private readonly Dictionary<int, int> _baseSkillMemo = new();
