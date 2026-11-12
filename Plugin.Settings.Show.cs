@@ -148,14 +148,16 @@ public sealed partial class Plugin
         else                      ApplyBuffTabFilter(s);
     }
 
-    // The list's Count func. Loads the active kind's table on the first refresh the window is really SHOWN (not during
-    // the hidden pre-build fill); a failed load (tables not ready yet) retries on the next refresh while it stays open.
+    // The list's Count func. Loads BOTH tables on the first refresh the window is really SHOWN (not during the hidden
+    // pre-build fill) — every kind chip, the header status and the footer count grouped rows, so all three kinds must be
+    // loaded before any number shows ("…" until then). A failed load (tables not ready yet) retries on the next refresh
+    // while it stays open. Each Ensure is a single bool check once loaded.
     private int SelListCount()
     {
         if (_settings != null && _settings.IsShown)
         {
-            if (_activeTab == 0) EnsureSkillTabLoaded();
-            else EnsureBuffTabLoaded();
+            EnsureSkillTabLoaded();
+            EnsureBuffTabLoaded();
         }
         return SelFiltCount;
     }
@@ -192,7 +194,8 @@ public sealed partial class Plugin
     private string KindTickedText(int tab)
     {
         EnsureTickCounts();
-        return _kindCountFmt[tab].Get("{0}", tab == 0 ? _stTicked : tab == 1 ? _dtTicked : _btTicked);
+        int n = tab == 0 ? _stTicked : tab == 1 ? _dtTicked : _btTicked;
+        return n < 0 ? PendingText : _kindCountFmt[tab].Get("{0}", n);   // "…" until that kind's table is loaded
     }
 
     private bool SelectShowsEmpty() => SelFiltCount == 0 && !string.IsNullOrWhiteSpace(SelFilter);

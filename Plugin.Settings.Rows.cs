@@ -47,19 +47,34 @@ public sealed partial class Plugin
             : GroupAllTracked(_btFiltMembers[i], _isBuffTrackedFn ??= _selection.IsBuffTracked);
     }
 
-    // ── ticked counts per kind (header status, kind chips, footer, confirm) ──────────────────────────────────────
-    // Skills: tracked ids. Debuffs / buffs: fully ticked name GROUPS once the table is loaded (raw id counts stand in
-    // before). Recounted only when _selVersion moved — a walk over the groups, never per refresh.
-    private int _tickCountVer = -1, _stTicked, _dtTicked, _btTicked;
+    // ── ticked counts per kind (header status, kind chips, footer, confirm, placed hint) ─────────────────────────
+    // ALWAYS "ticked rows as the list shows them": skills = list rows whose id is tracked; debuffs / buffs = fully
+    // ticked name GROUPS (a variant group = 1). Until a kind's table is loaded its count is TickPending (shown as "…"),
+    // never a raw saved-id count — those disagreed with the grouped number (11 raw debuff ids vs 4 rows, in game
+    // 2026-11-13). Recounted only when _selVersion moved — a walk over the rows, never per refresh.
+    private const int TickPending = -1;
+    private const string PendingText = "…";
+    private int _tickCountVer = -1, _stTicked = TickPending, _dtTicked = TickPending, _btTicked = TickPending;
 
     private void EnsureTickCounts()
     {
         if (_tickCountVer == _selVersion) return;
         _tickCountVer = _selVersion;
-        _stTicked = _selection.SkillCount;
-        if (!_buffTabLoaded) { _dtTicked = _selection.DebuffCount; _btTicked = _selection.BuffCount; return; }
+        _stTicked = TickPending;
+        if (_stBaseLoaded)
+        {
+            int n = 0;
+            for (int i = 0; i < _stCount; i++) if (_selection.IsCooldownTracked(_stIds[i])) n++;
+            _stTicked = n;
+        }
+        if (!_buffTabLoaded) { _dtTicked = _btTicked = TickPending; return; }
         _dtTicked = CountTicked(_dtMembers, _dtCount, _isDebuffTrackedFn ??= _selection.IsDebuffTracked);
         _btTicked = CountTicked(_btMembers, _btCount, _isBuffTrackedFn ??= _selection.IsBuffTracked);
+    }
+
+    private bool TickCountsReady
+    {
+        get { EnsureTickCounts(); return _stTicked >= 0 && _dtTicked >= 0 && _btTicked >= 0; }
     }
 
     private static int CountTicked(int[][] members, int count, Func<int, bool> isTracked)

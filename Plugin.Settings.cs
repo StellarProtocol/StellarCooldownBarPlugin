@@ -100,7 +100,7 @@ public sealed partial class Plugin
     // Each part is a cached format; the joined line is rebuilt only when a part string changed (reference compare).
     private string SettingsStatus()
     {
-        EnsureTickCounts();   // Plugin.Settings.Rows.cs
+        if (!TickCountsReady) return PendingText;   // Plugin.Settings.Rows.cs — grouped counts only, never raw ids
         bool hs = _selection.SkillMode  == TrackMode.ExcludeBelow;
         bool hd = _selection.DebuffMode == TrackMode.ExcludeBelow;
         bool hb = _selection.BuffMode   == TrackMode.ExcludeBelow;

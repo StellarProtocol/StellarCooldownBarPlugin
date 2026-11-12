@@ -67,7 +67,7 @@ public sealed partial class Plugin
 
     private string SelFooterText() => SelFooterNoteShowing()
         ? _selFooterNote
-        : _selFooterFmt.Get(_loc.T("cd.sel.footer"), SelActiveTicked);
+        : SelActiveTicked < 0 ? PendingText : _selFooterFmt.Get(_loc.T("cd.sel.footer"), SelActiveTicked);
 
     private string UntickQuestion() => _selConfirmFmt.Get(
         _loc.T(_activeTab == 0 ? "cd.sel.confirm.skills" : _activeTab == 1 ? "cd.sel.confirm.debuffs" : "cd.sel.confirm.buffs"),
@@ -107,7 +107,7 @@ public sealed partial class Plugin
 
     private void BeginUntickAll()
     {
-        if (SelActiveTicked == 0) return;
+        if (SelActiveTicked <= 0) return;
         _untickConfirmAt = _services.Framework.TimeNow;
     }
 
