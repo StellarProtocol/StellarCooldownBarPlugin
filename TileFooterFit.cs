@@ -4,29 +4,28 @@ namespace Stellar.CooldownBar;
 
 /// <summary>
 /// Whole-px geometry of a tile footer WITH the gold count chip (seconds + chip side by side), Unity-free so the fit is
-/// unit-tested. The pair must fit the tile's inner width with at least 2 px to spare on each side for the WORST case:
-/// the widest seconds label CdTimeFormat produces ("99m" / "16m") next to the widest chip ("99+", ChipText caps there).
+/// unit-tested. Every width is fixed — Margin + seconds box + Gap + chip + Margin = the footer cell — so the chip's right
+/// edge always sits Margin (≥ 2 px) inside the cell, whatever the labels are.
 /// <para>
-/// Widths come from the real font: the chip-arm texts are TMP bold = the framework's shipped StellarUIThaiBold.ttf
-/// (Noto Sans Bold, 1000 upm), measured with fontTools (advance widths, 2026-11-13):
-/// every digit and '+' = 0.572 em, "99m" = "16m" = 2.126 em, "9.8s" = 1.926, "57s" = 1.641, "2h" = 1.229, "99+" = 1.716,
-/// "99" = 1.144. "∞" is NOT in that face (TMP draws it from a fallback face) — it is a single glyph, far below 2.126 em
-/// in any font, and the seconds box is right-aligned, so even a wide fallback ∞ grows LEFT (into the free margin),
-/// never into the chip or past the tile's right edge.
+/// The seconds keep the NORMAL tile seconds style beside a chip (user 2026-11-13: same size as a chip-less tile, the
+/// bar's shadowed legacy 14 px included — never shrunk). They are right-aligned in their box, so a label wider than the
+/// box overflows LEFT (NoWrap = HorizontalWrapMode.Overflow), into the free margin and the card padding, never into the
+/// chip. That is what fixes "∞" + a two-digit chip (it used to push the chip past the tile's right edge): "∞" is one
+/// glyph (≤ <see cref="InfinityMaxEm"/> in any face; it is NOT in the TMP face, TMP draws it from a fallback), so it
+/// fits the box whole and simply sits left of centre beside the pinned chip. A wide time label ("99m" at the bar's
+/// legacy 14 px) may overhang the cell's left edge by a few px; accepted (rare, still on the card).
 /// </para>
-/// At 100 % the old footer (legacy 14 px seconds in a 28 px box + gap 2 + a hugging chip) needed 28 + 2 + 17 = 47 px of
-/// a 44 px cell for a two-digit count, and there is no width for a 14 px seconds label beside "99+" at all — so with a
-/// chip the seconds drop to a smaller TMP bold size that fits (<see cref="SecsFont"/>), and a 3-character chip uses a
-/// smaller font than 1–2 characters (<see cref="ChipFont3"/>) inside one FIXED chip width, so the chip never changes
-/// size as the count changes.
+/// Chip font sizes come from the real font: TMP bold = the framework's StellarUIThaiBold.ttf (Noto Sans Bold, 1000 upm),
+/// every digit and '+' = 0.572 em (fontTools, 2026-11-13). One chip width serves every count: "1".."99" at
+/// <see cref="ChipFont2"/>, "99+" at the smaller <see cref="ChipFont3"/>, so the chip never changes size.
 /// </summary>
 internal readonly struct TileFooterFit
 {
-    public const float DigitEm      = 0.572f;   // every digit and '+', Noto Sans Bold
-    public const float WidestSecsEm = 2.126f;   // "99m" / "16m" — the widest CdTimeFormat label (no '*' fallback mark)
+    public const float DigitEm       = 0.572f;   // every digit and '+', Noto Sans Bold
+    public const float InfinityMaxEm = 1.0f;     // generous bound for a single fallback-face "∞" glyph
 
     public readonly float Margin, Gap, ChipPad, ChipW, ChipLabelW, SecsW;
-    public readonly int   ChipFont2, ChipFont3, SecsFont;
+    public readonly int   ChipFont2, ChipFont3;
 
     /// <summary><paramref name="s"/> = tile size (1 = 100 %), <paramref name="innerW"/> = the footer cell width,
     /// <paramref name="chipH"/> = the chip height (a 1–2 digit chip is never narrower than it is tall: a circle).</summary>
@@ -41,10 +40,8 @@ internal readonly struct TileFooterFit
         float label = MathF.Ceiling(MathF.Max(2f * DigitEm * ChipFont2, 3f * DigitEm * ChipFont3));
         ChipW      = MathF.Max(label + 2f * ChipPad, chipH);
         ChipLabelW = ChipW - 2f * ChipPad;
-        // The seconds take every px that is left, and the largest whole font whose widest label fits it (never larger
-        // than the chip-less 12·s, so the seconds only ever get smaller when a chip appears).
-        SecsW    = innerW - 2f * Margin - Gap - ChipW;
-        SecsFont = Math.Min((int)Px(12f * s), (int)MathF.Floor(SecsW / WidestSecsEm));
+        // The seconds box takes every px that is left; the text in it keeps its normal size and grows left if wider.
+        SecsW = innerW - 2f * Margin - Gap - ChipW;
     }
 
     /// <summary>The chip text: exact 1–99, "99+" from 100 (the widest label the fixed chip is sized for).</summary>

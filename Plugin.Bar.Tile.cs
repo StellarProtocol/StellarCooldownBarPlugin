@@ -12,15 +12,16 @@ namespace Stellar.CooldownBar;
 //     • fill bar: BarElement 40×4 (smooth, per frame, unquantised — TrackedTile.FillAt);
 //     • footer, 16 px, in a FIXED 44 px cell: bold seconds in the kind colour, and only while there is a count to show, a
 //       gold chip (14 tall, round, gold @25 %, bold gold "1".."99" / "99+"). With a chip the seconds sit in a fixed
-//       right-aligned box beside it at a smaller size and the pair is centred, ≥ 2 px inside the cell for the worst case
-//       ("99m" + "99+"; TileFooterFit.cs has the font-measured numbers); without, the seconds centre in the whole 44 px.
+//       right-aligned box beside it (normal size and style, never shrunk) and the chip is pinned 2 px inside the cell's
+//       right edge, so "∞" + "14" sits left of centre instead of pushing the chip out (TileFooterFit.cs); without, the
+//       seconds centre in the whole 44 px.
 // Sizes (Placed mode, 75–200 %): the toolkit can't scale a window, so every number above is multiplied by the size and
 // rounded to whole px in a TileGeom, and each size is BUILT separately (icon, bar, fonts, chip, padding re-laid out —
 // never stretched). The bar always uses TileGeom 100 % with the shadow.
-// Shadow (bar only, user 2026-11-13): the chip-less seconds get the readability outline (beside a chip they are TMP bold,
-// see TileGeom). A Shadow text is the toolkit's LEGACY path — fixed 14 px synthetic bold, FontSize ignored
-// (Plugin.Bar.cs caption note) — so it can't scale; Placed tiles keep
-// the TMP bold at the scaled size instead (they sit on their own card, there is no Background setting for them).
+// Shadow (bar only, user 2026-11-13): the seconds get the readability outline, with or without a chip. A Shadow text is
+// the toolkit's LEGACY path — fixed 14 px synthetic bold, FontSize ignored (Plugin.Bar.cs caption note) — so it can't
+// scale; Placed tiles keep the TMP bold at the scaled size instead (they sit on their own card, there is no Background
+// setting for them).
 // Every size is pinned (struts / fixed widths / Text.Height), so a ticking label, a chip appearing or a load-late icon
 // never resizes the tile or moves a neighbour. Bar geometry numbers: Plugin.Seen.cs.
 //
@@ -53,8 +54,6 @@ public sealed partial class Plugin
             BarH = MathF.Max(2f, Px(4f * s)); FooterH = Px(16f * s); ColGap = MathF.Max(1f, Px(2f * s));
             ChipH = Px(14f * s); Radius = Px(6f * s);
             SecsFont = (int)Px(12f * s); AbbrevFont = (int)Px(14f * s);
-            // Same fit for the bar: its shadowed legacy seconds are a fixed 14 px ("99m" ≈ 28 px) and can't shrink, so
-            // beside a chip the bar draws TMP bold seconds too (they sit on the tile's own card, like Placed tiles).
             Chip = new TileFooterFit(s, InnerW, ChipH);
         }
 
@@ -114,20 +113,20 @@ public sealed partial class Plugin
     // Footer: seconds alone (centred in InnerW) or seconds + gold chip (centred together). Two complete arms, both inside
     // the caller's fixed InnerW cell, so switching never changes the card's width. In the chip arm every width is fixed
     // (seconds box + gap + chip = InnerW − 2·Margin), so the pair sits Margin (≥ 2 px) inside each edge whatever the
-    // labels are; the seconds are right-aligned, so a label wider than measured (a fallback-face "∞") grows LEFT.
+    // labels are. The seconds keep the normal font + shadow (user 2026-11-13) and are right-aligned, so a label wider than
+    // the box grows LEFT, never into the chip; "∞" fits the box whole and just sits left of centre.
     private HudElement TileFooter(Func<int> slot, TileGeom g, Func<float>? fade) => new ConditionalElement(
         P(() => TileChipCount(slot()) > 0),
         new RowElement(new HudElement[]
         {
-            SecondsText(slot, g, fade, g.Chip.SecsW, TextAlign.Right, g.Chip.SecsFont, shadow: false),
+            SecondsText(slot, g, fade, g.Chip.SecsW, TextAlign.Right),
             TileChip(slot, g, fade),
         }, Gap: g.Chip.Gap, Justify: RowJustify.Center),
-        SecondsText(slot, g, fade, g.InnerW, TextAlign.Center, g.SecsFont, g.Shadow));
+        SecondsText(slot, g, fade, g.InnerW, TextAlign.Center));
 
-    private HudElement SecondsText(Func<int> slot, TileGeom g, Func<float>? fade, float width, TextAlign align, int font,
-        bool shadow)
+    private HudElement SecondsText(Func<int> slot, TileGeom g, Func<float>? fade, float width, TextAlign align)
         => new TextElement(P(() => SecondsLabel(slot())), P<ColorRgba?>(() => Faded(KindColor(slot()), fade)),
-            Width: width, Align: align, NoWrap: true, FontSize: font, Shadow: shadow) { Bold = true, Height = g.FooterH };
+            Width: width, Align: align, NoWrap: true, FontSize: g.SecsFont, Shadow: g.Shadow) { Bold = true, Height = g.FooterH };
 
     // Gold chip, ChipH tall, round (house: radius = side/2 − 1), ONE fixed width for every count (TileFooterFit): "1".."99"
     // at ChipFont2, "99+" at the smaller ChipFont3, both in the same label box (CenterGlyphs: TMP centres the drawn
