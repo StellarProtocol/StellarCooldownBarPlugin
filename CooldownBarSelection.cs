@@ -65,6 +65,22 @@ internal sealed class CooldownBarSelection
         else    { _debuffs.Remove(baseId); _imagineOptOut.Add(baseId); }
     }
 
+    /// <summary>The raw tracked ids per kind (read-only views; enumerate, never mutate through them).</summary>
+    public IReadOnlyCollection<int> SkillIds  => _skills;
+    public IReadOnlyCollection<int> DebuffIds => _debuffs;
+    public IReadOnlyCollection<int> BuffIds   => _buffs;
+
+    /// <summary>Replace a kind's whole tracked set (the stale-id normalisation, Plugin.Normalize.cs). Debuffs: every id
+    /// now tracked leaves the imagine opt-out set, exactly as ticking it by hand would.</summary>
+    public void ReplaceSkills(IEnumerable<int> ids)  { _skills.Clear();  _skills.UnionWith(ids); }
+    public void ReplaceBuffs(IEnumerable<int> ids)   { _buffs.Clear();   _buffs.UnionWith(ids); }
+    public void ReplaceDebuffs(IEnumerable<int> ids)
+    {
+        _debuffs.Clear();
+        _debuffs.UnionWith(ids);
+        _imagineOptOut.ExceptWith(_debuffs);
+    }
+
     /// <summary>Number of tracked (ticked) ids per kind — raw ids, not name groups.</summary>
     public int SkillCount  => _skills.Count;
     public int DebuffCount => _debuffs.Count;

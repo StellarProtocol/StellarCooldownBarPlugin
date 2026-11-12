@@ -158,6 +158,7 @@ public sealed partial class Plugin
         {
             EnsureSkillTabLoaded();
             EnsureBuffTabLoaded();
+            TryNormalizeSelection();   // Plugin.Normalize.cs — once per session, the first time both are loaded
         }
         return SelFiltCount;
     }

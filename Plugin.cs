@@ -50,6 +50,7 @@ public sealed partial class Plugin : IStellarPlugin
         BuffTrackPatch.ShowHidden = _showHidden;               // full-vs-showed buff list source for the bar
         TranslatedBuffText.EnsureLoaded();   // English NameDesign labels — parsed on a background task; OnUpdate polls ConsumeLoaded
         _selection = CooldownBarSelection.Load(_cfg);
+        InitNormalize();      // Plugin.Normalize.cs — has the stale-id conversion run on this install?
         _attr = new DebuffAttribution(
             buffSkillId:    id => _services.GameData.Combat.GetBuff(id)?.SkillId ?? 0,
             imagineSkillOf: sk => _services.ResonanceData.GetImagineForSkill(sk)?.SkillId ?? 0);
@@ -156,6 +157,7 @@ public sealed partial class Plugin : IStellarPlugin
             TickBarFrame();                    // Plugin.Bar.Frame.cs — re-style a remounted root, live panel colour
             TickBarMigration(deltaTime);       // one-time; a single compare once done
         }
+        TickEagerTables();        // Plugin.Normalize.cs — table load + stale-id conversion, until done
         if (TranslatedBuffText.ConsumeLoaded(out var loadMsg)) OnTranslatedTextLoaded(loadMsg);   // one int read/frame
         BgSaveTick();             // Plugin.Settings.cs — debounced config write after an opacity-slider drag
         TickTooltipPlace();       // Plugin.Tooltip.cs — re-assert cursor rect after destroy-on-hide remount
