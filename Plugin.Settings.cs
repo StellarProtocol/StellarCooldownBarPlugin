@@ -90,12 +90,31 @@ public sealed partial class Plugin
 
     // ── header status ─────────────────────────────────────────────────────────────────────────────────────────────
     private readonly FmtCache _statusFmt = new();
+    private readonly FmtCache[] _statusPartFmt = { new(), new(), new() };
+    private string? _statusP0, _statusP1, _statusP2;
+    private string _statusMixed = string.Empty;
 
-    // "Showing 2 skills · 11 debuffs · 342 buffs" = the ticked count per kind (the kind chips show the same numbers).
+    // The ticked count per kind (the kind chips show the same numbers), worded by each kind's mode: a kind in
+    // "All except ticked" HIDES its ticked effects. All three in one mode → one verb: "Showing 2 skills · 11 debuffs ·
+    // 342 buffs" / "Hiding …"; mixed → a verb per kind: "Showing 2 skills · Hiding 4 debuffs · Showing 10 buffs".
+    // Each part is a cached format; the joined line is rebuilt only when a part string changed (reference compare).
     private string SettingsStatus()
     {
         EnsureTickCounts();   // Plugin.Settings.Rows.cs
-        return _statusFmt.Get(_loc.T("cd.settings.status"), _stTicked, _dtTicked, _btTicked);
+        bool hs = _selection.SkillMode  == TrackMode.ExcludeBelow;
+        bool hd = _selection.DebuffMode == TrackMode.ExcludeBelow;
+        bool hb = _selection.BuffMode   == TrackMode.ExcludeBelow;
+        if (hs == hd && hd == hb)
+            return _statusFmt.Get(_loc.T(hs ? "cd.settings.status.hide" : "cd.settings.status"), _stTicked, _dtTicked, _btTicked);
+        var p0 = _statusPartFmt[0].Get(_loc.T(hs ? "cd.status.hide.skills"  : "cd.status.show.skills"),  _stTicked);
+        var p1 = _statusPartFmt[1].Get(_loc.T(hd ? "cd.status.hide.debuffs" : "cd.status.show.debuffs"), _dtTicked);
+        var p2 = _statusPartFmt[2].Get(_loc.T(hb ? "cd.status.hide.buffs"   : "cd.status.show.buffs"),   _btTicked);
+        if (!ReferenceEquals(p0, _statusP0) || !ReferenceEquals(p1, _statusP1) || !ReferenceEquals(p2, _statusP2))
+        {
+            _statusP0 = p0; _statusP1 = p1; _statusP2 = p2;
+            _statusMixed = p0 + " · " + p1 + " · " + p2;
+        }
+        return _statusMixed;
     }
 
     // ── BAR panel ─────────────────────────────────────────────────────────────────────────────────────────────────
