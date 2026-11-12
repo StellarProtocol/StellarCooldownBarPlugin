@@ -9,14 +9,15 @@ namespace Stellar.CooldownBar;
 /// (v1) asked the game's skill lookup, which answers with a name for sub-ids such as 392301 too, so the stale id was
 /// "kept" and the Skills count read 1 instead of 2 (in game 2026-11-13).
 /// <list type="bullet">
-/// <item>Skills: kept when the list shows the id; else converted to id/100 when the list shows THAT (392301 → 3923
-/// "Arcane! Furious Hammer"); else dropped.</item>
+/// <item>Skills (<see cref="MapSkill"/>): kept when the list shows the id; else converted to id/100 when the list shows
+/// THAT (392301 → 3923 "Arcane! Furious Hammer"); else the same against every SkillTable row (hidden ones); else dropped.</item>
 /// <item>Debuffs / buffs: a member id of a displayed name GROUP ticks the whole group (the list reads a group as ticked
 /// only when every member is), so a partially ticked group from an old per-id config becomes one ticked row. An id in
-/// no group is dropped.</item>
+/// no listed group is kept while it is any BuffTable row (hidden effects), else dropped.</item>
 /// </list>
-/// Results are de-duplicated (sets). The caller runs this only once the lists are loaded, so "not in the list" is never
-/// "list not built yet".
+/// The "Hidden effects" display filter never drops a tick: only ids that exist nowhere in the game tables go.
+/// Results are de-duplicated (sets). The caller runs this only once the tables are loaded, so "exists nowhere" is never
+/// "table not built yet".
 /// </summary>
 internal static class SelectionNormalizer
 {
@@ -51,8 +52,10 @@ internal static class SelectionNormalizer
         return result;
     }
 
-    // `members[g]` = every id of display group g (the settings list's grouping, Plugin.Settings.Tables.cs).
-    public static HashSet<int> Groups(IReadOnlyCollection<int> saved, int[][] members, int count,
+    // `members[g]` = every id of display group g (the settings list's grouping, Plugin.Settings.Tables.cs). `all` = every
+    // BuffTable row id, unfiltered: an id in no listed group (e.g. a hidden effect while "Hidden effects" is off) is KEPT
+    // when it is still a real row — a display filter never drops a saved tick; only ids that exist nowhere are dropped.
+    public static HashSet<int> Groups(IReadOnlyCollection<int> saved, int[][] members, int count, ISet<int> all,
         ref int converted, ref int dropped)
     {
         var groupOf = new Dictionary<int, int>();
@@ -68,6 +71,7 @@ internal static class SelectionNormalizer
                 foreach (int m in members[g])
                     if (result.Add(m) && !savedSet.Contains(m)) converted++;   // a group member added to complete the row
             }
+            else if (all.Contains(id)) result.Add(id);
             else dropped++;
         }
         return result;

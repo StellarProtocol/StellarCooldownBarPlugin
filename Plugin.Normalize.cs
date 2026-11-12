@@ -49,15 +49,15 @@ public sealed partial class Plugin
     private void TryNormalizeSelection()
     {
         if (_normDone || !_stBaseLoaded || !_buffTabLoaded) return;
-        // Readiness: the lists themselves. A drop means "the list doesn't show it", so both lists must be built (an empty
-        // list = not loaded yet, never "everything is stale").
-        if (_stCount == 0 || _dtCount + _btCount == 0) return;
+        // Readiness: the tables themselves. A drop means "exists nowhere in the game tables", so both full id sets must be
+        // built (an empty set = not loaded yet, never "everything is stale").
+        if (_stCount == 0 || _dtCount + _btCount == 0 || _stAllSet.Count == 0 || _buffAllSet.Count == 0) return;
         _normDone = true;
 
         int converted = 0, dropped = 0;
         var skills  = SelectionNormalizer.Skills(_selection.SkillIds, _stListSet, _stAllSet, ref converted, ref dropped);
-        var debuffs = SelectionNormalizer.Groups(_selection.DebuffIds, _dtMembers, _dtCount, ref converted, ref dropped);
-        var buffs   = SelectionNormalizer.Groups(_selection.BuffIds,   _btMembers, _btCount, ref converted, ref dropped);
+        var debuffs = SelectionNormalizer.Groups(_selection.DebuffIds, _dtMembers, _dtCount, _buffAllSet, ref converted, ref dropped);
+        var buffs   = SelectionNormalizer.Groups(_selection.BuffIds,   _btMembers, _btCount, _buffAllSet, ref converted, ref dropped);
 
         bool changed = !skills.SetEquals(_selection.SkillIds) || !debuffs.SetEquals(_selection.DebuffIds)
                        || !buffs.SetEquals(_selection.BuffIds);

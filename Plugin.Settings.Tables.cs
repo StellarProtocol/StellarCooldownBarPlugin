@@ -68,6 +68,9 @@ public sealed partial class Plugin
     private int      _btOffset    = 0;
     private readonly UvRect[] _btUv = new UvRect[SettingsPoolSize];
     private bool     _buffTabLoaded = false;
+    // Every BuffTable row id (debuffs and buffs, unfiltered — hidden effects included): the stale-id conversion keeps a
+    // saved tick that is in no listed group but still a real effect (SelectionNormalizer.Groups). Replaced on each load.
+    private HashSet<int> _buffAllSet = new();
 
     // ── Lazy loaders (idempotent: called from VirtualListElement Count func) ──
 
@@ -205,6 +208,7 @@ public sealed partial class Plugin
             // Group by display Name (exact match, first-seen order). name → group index into the parallel lists.
             var dGroups = new BuffGroupAccumulator();
             var bGroups = new BuffGroupAccumulator();
+            var all = new HashSet<int>();
             // Show-hidden uses the resolved label (game Name for real buffs, NameDesign for hidden ones) BOTH as the
             // display name and the grouping key, so distinct hidden buffs don't collapse into one placeholder blob.
             if (_showHidden) TranslatedBuffText.EnsureLoaded();   // no-op once started; labels fall back until it lands
@@ -232,6 +236,7 @@ public sealed partial class Plugin
                 }
                 int id = (int)(piId?.GetValue(row) ?? 0);
                 if (id <= 0) continue;
+                all.Add(id);   // before the Hidden-effects filter
                 string gameName = (string?)(piName?.GetValue(row)) ?? "";
                 string icon = (string?)(piIcon?.GetValue(row)) ?? "";
                 if (!_showHidden && (string.IsNullOrEmpty(gameName) || string.IsNullOrEmpty(icon))) continue;
@@ -241,6 +246,7 @@ public sealed partial class Plugin
                 string name = _showHidden ? TranslatedBuffText.ResolveLabel(id, gameName) : gameName;
                 (buffType == 0 ? dGroups : bGroups).Add(name, id, desc);
             }
+            _buffAllSet = all;
             dGroups.Export(out _dtIds, out _dtNames, out _dtDescs, out _dtMembers, out _dtCount);
             bGroups.Export(out _btIds, out _btNames, out _btDescs, out _btMembers, out _btCount);
             _services.Log.Info($"[Settings] loaded {_dtCount} debuff groups, {_btCount} buff groups");

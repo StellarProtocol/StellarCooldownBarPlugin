@@ -53,15 +53,40 @@ public class SelectionNormalizerTests
         Assert.Equal((0, 0), (conv, drop));
     }
 
+    // Every BuffTable row in the group tests: the listed groups' members + 30, a hidden effect (no name/icon → in no
+    // listed group while "Hidden effects" is off). 40 exists nowhere.
+    private static readonly HashSet<int> BuffRows = new() { 10, 11, 12, 20, 30 };
+
     [Fact]
-    public void Groups_CompletePartialGroup_DropUngrouped()
+    public void Groups_CompletePartialGroup_KeepHiddenRow_DropUnknown()
     {
         var members = new[] { new[] { 10, 11, 12 }, new[] { 20 } };
         int conv = 0, drop = 0;
-        var r = SelectionNormalizer.Groups(new[] { 11, 20, 30, 40 }, members, 2, ref conv, ref drop);
-        Assert.Equal(new HashSet<int> { 10, 11, 12, 20 }, r);
+        var r = SelectionNormalizer.Groups(new[] { 11, 20, 30, 40 }, members, 2, BuffRows, ref conv, ref drop);
+        Assert.Equal(new HashSet<int> { 10, 11, 12, 20, 30 }, r);
         Assert.Equal(2, conv);   // 10 and 12 added to complete group 0
-        Assert.Equal(2, drop);   // 30, 40: in no group the list shows
+        Assert.Equal(1, drop);   // 40: exists nowhere
+    }
+
+    // "Hidden effects" off: the hidden effect's tick is in no listed group, but it is a real row → it stays.
+    [Fact]
+    public void Groups_HiddenEffect_StaysWhenHiddenFilterOff()
+    {
+        var listedGroups = new[] { new[] { 10, 11, 12 } };   // the hidden 30 is filtered out of the list
+        int conv = 0, drop = 0;
+        var r = SelectionNormalizer.Groups(new[] { 30 }, listedGroups, 1, BuffRows, ref conv, ref drop);
+        Assert.Equal(new HashSet<int> { 30 }, r);
+        Assert.Equal((0, 0), (conv, drop));
+    }
+
+    // Skills: a hidden SkillTable row stays too (not listed while "Hidden effects" is off).
+    [Fact]
+    public void Skills_HiddenSkill_StaysWhenHiddenFilterOff()
+    {
+        int conv = 0, drop = 0;
+        var r = SelectionNormalizer.Skills(new[] { 7001, 2233 }, List, All, ref conv, ref drop);
+        Assert.Equal(new HashSet<int> { 7001, 2233 }, r);
+        Assert.Equal((0, 0), (conv, drop));
     }
 
     [Fact]
@@ -69,7 +94,7 @@ public class SelectionNormalizerTests
     {
         var members = new[] { new[] { 10, 11 } };
         int conv = 0, drop = 0;
-        var r = SelectionNormalizer.Groups(new[] { 10, 11 }, members, 1, ref conv, ref drop);
+        var r = SelectionNormalizer.Groups(new[] { 10, 11 }, members, 1, BuffRows, ref conv, ref drop);
         Assert.Equal(new HashSet<int> { 10, 11 }, r);
         Assert.Equal((0, 0), (conv, drop));
     }
