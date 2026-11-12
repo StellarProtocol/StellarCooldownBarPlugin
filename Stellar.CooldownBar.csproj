@@ -32,6 +32,8 @@
     <EmbeddedResource Include="Resources\BuffTable.json" LogicalName="Stellar.CooldownBar.BuffTable.json" />
     <!-- Launcher-tile icon (read by LogicalName for the Stellar-menu entry). -->
     <EmbeddedResource Include="Resources/cooldownbar-icon.png" LogicalName="Stellar.CooldownBar.cooldownbar-icon.png" />
+    <!-- Settings header hourglass glyph: white, pre-drawn per size (tools/gen_hourglass_icon.py), on the live accent tile. -->
+    <EmbeddedResource Include="Resources/hourglass-*.png" LogicalName="Stellar.CooldownBar.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
