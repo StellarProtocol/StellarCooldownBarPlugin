@@ -26,11 +26,34 @@ public sealed partial class Plugin
     private int _rowsVisible;     // rows that fit in current height (1 or MaxRows)
     private int _totalTileCount;  // raw active count before display cap (for overflow indicator)
 
-    // _bar.Rect is stale during resize (TickResize writes sizeDelta directly, bypassing SetRect).
-    // Cache the root RectTransform and read rect.width/height directly for live values.
+    // Live bar size while the user resizes: TickResize writes the window root's sizeDelta directly, bypassing SetRect.
+    // Read the root RectTransform's rect. The framework names the window root GameObject after WindowSpec.Id
+    // (WindowBuilder.Chrome*.cs: UGuiPrimitives.NewRect(spec.Id, parent)), so Find("cooldownbar.main") hits it.
+    // (Framework 2.30's IWindowControl.Rect → WindowRenderer.GetRect also reads token.Rect.rect live — token.Rect IS
+    // that root — so _bar.Rect is a correct fallback there; the cached-RT path keeps older frameworks live too.)
+    // The window is destroyed on hide and remounted on show, so the cached RT can become Unity fake-null: re-validate
+    // with Unity's == (the old `??=` used a plain reference check and kept a dead object), and retry Find at most once
+    // per second while missing — GameObject.Find walks the whole scene.
     private RectTransform? _barRt;
-    private float BarWidth  => (_barRt ??= GameObject.Find("cooldownbar.main")?.GetComponent<RectTransform>()) != null ? _barRt!.rect.width  : _bar.Rect.Width;
-    private float BarHeight => (_barRt ??= GameObject.Find("cooldownbar.main")?.GetComponent<RectTransform>()) != null ? _barRt!.rect.height : _bar.Rect.Height;
+    private long _barRtRetryAt;
+
+    private RectTransform? BarRt()
+    {
+        var rt = _barRt;
+        if (!ReferenceEquals(rt, null) && rt == null) rt = _barRt = null;   // destroyed (remount) → look it up again
+        if (ReferenceEquals(rt, null))
+        {
+            long now = Environment.TickCount64;
+            if (now < _barRtRetryAt) return null;
+            _barRtRetryAt = now + 1000;
+            var go = GameObject.Find("cooldownbar.main");
+            rt = _barRt = go != null ? go.GetComponent<RectTransform>() : null;
+        }
+        return rt;
+    }
+
+    private float BarWidth  { get { var rt = BarRt(); return rt != null ? rt.rect.width  : _bar.Rect.Width;  } }
+    private float BarHeight { get { var rt = BarRt(); return rt != null ? rt.rect.height : _bar.Rect.Height; } }
 
     private void UpdateArrivalOrder(int n)
     {
