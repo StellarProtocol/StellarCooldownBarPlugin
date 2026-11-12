@@ -33,7 +33,7 @@ public sealed partial class Plugin
         var rows = new HudElement[MaxRows];
         for (int r = 0; r < MaxRows; r++) rows[r] = BuildTileRow(r);
 
-        var empty = new TextElement(P(() => _loc.T("cd.empty")), P<ColorRgba?>(() => MutedText()), NoWrap: true)
+        var empty = new TextElement(P(() => _loc.T("cd.empty")), P<ColorRgba?>(() => MutedText()), NoWrap: true, Shadow: true)
             { Ellipsize = true };
 
         return new ColumnElement(new HudElement[]
@@ -66,15 +66,17 @@ public sealed partial class Plugin
         return new ConditionalElement(P(() => _rowsVisible > r && _tileCount > r * _tilesPerRow), row);
     }
 
-    // "COOLDOWNS" (bold 12, UPPERCASE) + muted "· N active" (N = every active tile, overflow included; regular 12 via
-    // the TMP face — RichEmoji is the toolkit's regular-weight-at-a-size path) in a weighted, ellipsized cell that is
-    // also the flexible spacer, then the round gear. The 28 px gear pins the row height.
+    // "COOLDOWNS" (bold, UPPERCASE) + muted "· N active" (N = every active tile, overflow included) in a weighted,
+    // ellipsized cell that is also the flexible spacer, then the round gear. The 28 px gear pins the row height.
+    // Shadow (user-approved 2026-11-13): every bar text outside a tile card keeps the readability outline so it still reads
+    // with Background at 0 %. ⚠️ A Shadow text takes the toolkit's LEGACY Text path (WindowBuilder.BuildText: Shadow skips
+    // the TMP faces), so FontSize / RichEmoji are ignored there: these draw at the fixed 14 px, Bold = synthetic bold.
     private HudElement BuildBarCaption() => new RowElement(new HudElement[]
     {
         new TextElement(P(UpperCached(() => _loc.T("cd.barTitle"))), P<ColorRgba?>(() => TextColor()), NoWrap: true,
-            FontSize: 12) { Bold = true },
-        new CellElement(new TextElement(P(ActiveCaption), P<ColorRgba?>(() => MutedText()), NoWrap: true, FontSize: 12)
-            { RichEmoji = true, Ellipsize = true }, Weight: 1f),
+            FontSize: 12, Shadow: true) { Bold = true },
+        new CellElement(new TextElement(P(ActiveCaption), P<ColorRgba?>(() => MutedText()), NoWrap: true, FontSize: 12, Shadow: true)
+            { Ellipsize = true }, Weight: 1f),
         GearButton(),
     }, Gap: 6f);
 
@@ -101,11 +103,11 @@ public sealed partial class Plugin
         };
     }
 
-    // Round "+N" chip: 24 px tall, MenuText @14 % fill, bold 12 Text.
+    // Round "+N" chip: 24 px tall, MenuText @14 % fill, bold Text with the readability shadow (legacy 14 px, see above).
     private HudElement OverflowChip() => new BubbleElement(new RowElement(new HudElement[]
         {
             new SpacerElement(0f, OverflowChipH),
-            new TextElement(P(OverflowLabel), P<ColorRgba?>(() => TextColor()), NoWrap: true, FontSize: 12) { Bold = true },
+            new TextElement(P(OverflowLabel), P<ColorRgba?>(() => TextColor()), NoWrap: true, FontSize: 12, Shadow: true) { Bold = true },
         }, Gap: 0.01f, Justify: RowJustify.Center))
     {
         FillColorFn = P<ColorRgba?>(() => TextColor() with { A = 0.14f }),

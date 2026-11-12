@@ -10,8 +10,9 @@ namespace Stellar.CooldownBar;
 //     • icon: GameTexture 40×40, CornerRadius 5 (stencil-masked) — or, icon-less, the 2-letter fallback centred in a
 //       40×40 Tile-coloured rounded box;
 //     • fill bar: BarElement 40×4 (smooth, per frame, unquantised — TrackedTile.FillAt);
-//     • footer, 16 px, in a FIXED 44 px cell: bold 12 seconds in the kind colour, and only while there is a count to
-//       show, a gold chip (14 tall, r6, gold @25 %, bold 10 gold). With a chip the seconds sit in a fixed 24 px
+//     • footer, 16 px, in a FIXED 44 px cell: bold seconds in the kind colour WITH the readability shadow (user 2026-11-13;
+//       a Shadow text is the legacy 14 px path, not TMP bold 12 — Plugin.Bar.cs caption note), and only while there is a
+//       count to show, a gold chip (14 tall, r6, gold @25 %, bold 10 gold). With a chip the seconds sit in a fixed 28 px
 //       right-aligned box beside it and the pair is centred; without, the seconds centre in the whole 44 px.
 // Every size is pinned (struts / fixed widths / Text.Height), so a ticking label, a chip appearing or a load-late icon
 // never resizes the tile or moves a neighbour. Geometry numbers: Plugin.Seen.cs.
@@ -31,7 +32,7 @@ public sealed partial class Plugin
     private const float TileBarH       = 4f;
     private const float TileFooterH    = 16f;
     private const float TileColGap     = 2f;
-    private const float TileSecsBoxW   = 24f;   // seconds box beside a chip ("57s" / "9.8s" bold 12 ≈ 20–23)
+    private const float TileSecsBoxW   = 28f;   // seconds box beside a chip ("9.8s" in the legacy 14 px bold ≈ 26; 28 + 2 + 14 = 44)
     private const float TileChipH      = 14f;
     private const float TileChipDigitW = 8f;    // 1-digit chip: 8 + 2×3 padding = the spec's 14 px minimum width
     private const float CardWashAlpha  = 0.16f;
@@ -93,7 +94,7 @@ public sealed partial class Plugin
 
     private HudElement SecondsText(Func<int> slot, float width, TextAlign align)
         => new TextElement(P(() => SecondsLabel(slot())), P<ColorRgba?>(() => KindColor(slot())),
-            Width: width, Align: align, NoWrap: true, FontSize: 12) { Bold = true, Height = TileFooterH };
+            Width: width, Align: align, NoWrap: true, FontSize: 12, Shadow: true) { Bold = true, Height = TileFooterH };
 
     // Gold chip, 14 px tall, r6: one digit → a fixed 8 px label box (14 px chip); two or more → the label hugs its text.
     private HudElement TileChip(Func<int> slot)
