@@ -20,8 +20,8 @@ namespace Stellar.CooldownBar;
 public sealed partial class Plugin
 {
     // ── Seconds label ────────────────────────────────────────────────────────
-    private readonly long[]   _secKey = new long[MaxTiles];
-    private readonly string[] _secStr = new string[MaxTiles];
+    private readonly long[]   _secKey = new long[TileCap];
+    private readonly string[] _secStr = new string[TileCap];
 
     // CdTimeFormat.cs owns the format (unit-tested) and the integer key that drives it.
     private string SecondsLabel(int idx)
@@ -38,8 +38,8 @@ public sealed partial class Plugin
 
     // ── Charge / stack chip ──────────────────────────────────────────────────
     // One string per slot, rebuilt only when the count changes (stacks / pending charges move at human speed).
-    private readonly int[]    _chipN   = new int[MaxTiles];
-    private readonly string[] _chipStr = new string[MaxTiles];
+    private readonly int[]    _chipN   = new int[TileCap];
+    private readonly string[] _chipStr = new string[TileCap];
 
     private string ChipLabel(int idx)
     {

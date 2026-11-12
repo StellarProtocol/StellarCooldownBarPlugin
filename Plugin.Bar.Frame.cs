@@ -112,6 +112,7 @@ public sealed partial class Plugin
         _migrateShownS += dt;
         if (_migrateShownS < 1f) return;
         _migrateShownS = -1f;
+        if (_bar == null) return;
         var rect = _bar.Rect;
         float h = BarHeight;
         if (h > 1f && rect.Width > 1f)

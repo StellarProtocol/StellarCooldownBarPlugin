@@ -31,6 +31,8 @@ public sealed partial class Plugin
     private int    _selFlashTab = -1, _selFlashId;
     private float  _selFlashAt;
     private bool   _selFlashAdded;
+    private bool   _selFlashFull;                   // Placed mode was full: amber flash "30 max" + amber footer
+    private string _selFlashFullLabel = string.Empty;
     private string _selFooterNote = string.Empty;   // composed once per click (not per refresh)
     private float  _selFooterNoteAt = float.NegativeInfinity;
     private float  _untickConfirmAt = -1f;          // ≥ 0 while the inline "Untick all" confirm is showing
@@ -56,7 +58,7 @@ public sealed partial class Plugin
         }, Gap: 4f),
         new RowElement(new HudElement[]
         {
-            new CellElement(new TextElement(SelFooterText, Color: () => SelFooterNoteShowing() ? SuccessColor() : MutedText(),
+            new CellElement(new TextElement(SelFooterText, Color: () => !SelFooterNoteShowing() ? MutedText() : _selFlashFull ? AmberText() : SuccessColor(),
                 NoWrap: true) { Ellipsize = true }, Weight: 1f),
             CautionButton(() => _loc.T("cd.sel.untickAll"), BeginUntickAll, UntickPillLabelW,
                 enabled: () => SelActiveTicked > 0),
@@ -87,20 +89,27 @@ public sealed partial class Plugin
         return i >= 0 && i < SelFiltCount && SelFiltIds[i] == _selFlashId;
     }
 
-    private string SelFlashLabel() => _loc.T(_selFlashAdded ? "cd.sel.added" : "cd.sel.removed");
+    private string SelFlashLabel() => _selFlashFull ? _selFlashFullLabel : _loc.T(_selFlashAdded ? "cd.sel.added" : "cd.sel.removed");
 
-    // The green word sits on the green-washed tile; keep it readable on the Light theme too.
+    // Green flash, or amber when the tick could not be placed (Placed mode holds MaxPlaced).
+    private ColorRgba SelFlashColor() => _selFlashFull ? Menu.Caution : SuccessColor();
+
+    // The green (amber) word sits on the green- (amber-) washed tile; keep it readable on the Light theme too.
     private ColorRgba SelFlashTextColor()
-        => EnsureContrast(SuccessColor(), Over(SuccessColor() with { A = FlashWashAlpha }, TileColor()), SolidMinContrast);
+        => EnsureContrast(SelFlashColor(), Over(SelFlashColor() with { A = FlashWashAlpha }, TileColor()), SolidMinContrast);
 
     // ── events ────────────────────────────────────────────────────────────────────────────────────────────────────
-    private void OnEffectToggled(int tab, int id, string name, bool added)
+    private void OnEffectToggled(int tab, int id, string name, bool added, bool full = false)
     {
         var now = _services.Framework.TimeNow;
         _selFlashTab = tab; _selFlashId = id;
         _selFlashAt = now;
         _selFlashAdded = added;
-        _selFooterNote = _loc.TFormat(added ? "cd.sel.feedback.added" : "cd.sel.feedback.removed", name, SelActiveTicked);
+        _selFlashFull = full;
+        if (full) _selFlashFullLabel = _loc.TFormat("cd.sel.max", MaxPlaced);
+        _selFooterNote = full
+            ? _loc.TFormat("cd.placed.full", MaxPlaced, name)   // "Placed mode holds up to 30 effects. Untick one to place “X”."
+            : _loc.TFormat(added ? "cd.sel.feedback.added" : "cd.sel.feedback.removed", name, SelActiveTicked);
         _selFooterNoteAt = now;
         _untickConfirmAt = -1f;   // any other action dismisses a pending confirm
     }
@@ -124,10 +133,12 @@ public sealed partial class Plugin
         else if (tab == 1) _selection.ClearDebuffs();   // also opts each one out of imagine auto-track, like a row untick
         else               _selection.ClearBuffs();
         _selection.Save(_cfg);
+        OnTrackedChanged();   // Plugin.Placed.cs
         if (tab == 0)      ApplySkillTabFilter(_stFilter);
         else if (tab == 1) ApplyDebuffTabFilter(_dtFilter);
         else               ApplyBuffTabFilter(_btFilter);
         _selFlashTab = -1;
+        _selFlashFull = false;
         _selFooterNote = _loc.T(tab == 0 ? "cd.sel.feedback.clearedSkills" : tab == 1 ? "cd.sel.feedback.clearedDebuffs"
                                                                           : "cd.sel.feedback.clearedBuffs");
         _selFooterNoteAt = _services.Framework.TimeNow;

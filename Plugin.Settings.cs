@@ -9,10 +9,11 @@ namespace Stellar.CooldownBar;
 /// Settings window, house style (approved redesign 2026-11-13, <c>_scratch\prototypes\cooldownbar-redesign*.{md,html}</c>).
 /// A fixed-size 420 px GlassMenu window, opened by F8 / the bar's gear / the launcher tile:
 ///   ToolHeader: [40 px accent tile, white hourglass] [bold "Cooldown Bar" / muted "Showing 2 skills · 11 debuffs · 342 buffs"]
-///   BAR panel ("how the bar looks"): Background [round-knob slider] [bold 80 %] [?] · Hidden effects [Off/On] [?]
+///   DISPLAY panel: Show as [Bar] [Placed] [?] · Background slider (Bar) / Size chips (Placed) · Hidden effects [Off/On] [?]
 ///   WHAT TO SHOW panel: kind chips · mode chips + [?] · search + ✕ · list (or "No … match") · footer / Untick-all confirm
 /// The WHAT TO SHOW panel: Plugin.Settings.Show.cs; rows: Plugin.Settings.Rows.cs; row flash / footer / Untick all:
-/// Plugin.Settings.Feedback.cs; "?" popover: Plugin.Settings.Help.cs; table load + filter: Plugin.Settings.Tables.cs.
+/// Plugin.Settings.Feedback.cs; "?" popover: Plugin.Settings.Help.cs; table load + filter: Plugin.Settings.Tables.cs;
+/// Placed-mode rows, size chip + popover: Plugin.Settings.Placed.cs; open / close: Plugin.Settings.Open.cs.
 /// Tables load lazily the first time the window is SHOWN (game tables may not be ready at plugin init). A toggle writes
 /// the config at once; the bar reflects it on its next 10 Hz rebuild.
 /// </summary>
@@ -20,14 +21,14 @@ public sealed partial class Plugin
 {
     // Window: 420 wide, FIXED height (WindowSpec.FixedHeight), so nothing it shows — search results, the empty note, the
     // Untick-all confirm, feedback — can grow or shrink it (house rule 14). Height = title bar 32 + body padding 2×12 +
-    // header ≈42 + BAR panel ≈102 (padding 16 + caption ≈18 + 2 rows of 28 + 2 gaps of 6) + WHAT TO SHOW panel without
-    // its list ≈144 (padding 16 + caption ≈18 + kind chips 24 + mode row 24 + search 28 + footer 28 + 5 gaps of 6) +
-    // 2 gaps of 10 = 364 + the list. 620 → the list gets ≈256 (9 rows, the prototype's list height); the confirm block
-    // (≈90, vs the 28 px footer) takes 62 of that → 7 rows. The list viewport is FLEXIBLE (ConditionalElement Fill, base
+    // header ≈42 + DISPLAY panel ≈136 (padding 16 + caption ≈18 + 3 rows of 28 + 3 gaps of 6) + WHAT TO SHOW panel
+    // without its list ≈144 (padding 16 + caption ≈18 + kind chips 24 + mode row 24 + search 28 + footer 28 + 5 gaps of
+    // 6) + 2 gaps of 10 = 398 + the list. 654 → the list gets ≈256 (9 rows, the prototype's list height); the confirm
+    // block (≈90, vs the 28 px footer) takes 62 of that → 7 rows. (620 before the DISPLAY mode row of Placed mode.) The list viewport is FLEXIBLE (ConditionalElement Fill, base
     // 6 rows): it takes the column's spare height, so the footer ↔ confirm swap moves the list's bottom edge, never the
     // window's (TargetLens Select-window recipe).
     private const float SettingsWindowW = 420f;
-    private const float SettingsWindowH = 620f;
+    private const float SettingsWindowH = 654f;
     private const float SettingsGap     = 10f;   // between header / panels (the prototype's 10)
     private const float PanelGap        = 6f;    // inside a panel
     // Body 396 (420 − 2×12) − panel padding 2×10 = 376 inside a panel.
@@ -63,7 +64,7 @@ public sealed partial class Plugin
     private HudElement BuildSettingsRoot() => new ColumnElement(new HudElement[]
     {
         ToolHeader("hourglass-24.png", () => _loc.T("cd.settings.title"), SettingsStatus),
-        BuildBarSection(),
+        BuildDisplaySection(),
         BuildShowSection(),   // Plugin.Settings.Show.cs
     }, Gap: SettingsGap);
 
@@ -81,6 +82,7 @@ public sealed partial class Plugin
     // Each part is a cached format; the joined line is rebuilt only when a part string changed (reference compare).
     private string SettingsStatus()
     {
+        if (_placedMode) return PlacedStatus();       // "Placed: N effects on screen" (Plugin.Settings.Placed.cs)
         if (!TickCountsReady) return PendingText;   // Plugin.Settings.Rows.cs — grouped counts only, never raw ids
         bool hs = _selection.SkillMode  == TrackMode.ExcludeBelow;
         bool hd = _selection.DebuffMode == TrackMode.ExcludeBelow;
@@ -98,23 +100,28 @@ public sealed partial class Plugin
         return _statusMixed;
     }
 
-    // ── BAR panel ─────────────────────────────────────────────────────────────────────────────────────────────────
-    private HudElement BuildBarSection() => SectionPanel(() => _loc.T("cd.sec.bar"), () => _loc.T("cd.sec.barHint"),
+    // ── DISPLAY panel ─────────────────────────────────────────────────────────────────────────────────────────────
+    // [Show as: Bar / Placed] · Bar → Background, Placed → Size (there is no bar panel to colour) · Hidden effects. The
+    // middle row is two complete 28 px rows swapped by a Conditional, so switching never changes the panel's height.
+    private HudElement BuildDisplaySection() => SectionPanel(() => _loc.T("cd.sec.display"), () => _loc.T("cd.sec.displayHint"),
         new HudElement[]
         {
-            SettingRow(
-                new CellElement(new TextElement(() => _loc.T("cd.bg"), Color: () => TextColor(), NoWrap: true)
-                    { Ellipsize = true }, Width: BgLabelW),
-                new CellElement(RoundSlider(() => _bgOpacity, SetBgOpacity, 0f, 1f), Weight: 1f),
-                new CellElement(new TextElement(BgPercent, Color: () => TextColor(), Align: TextAlign.Right, NoWrap: true,
-                    FontSize: 13) { Bold = true }, Width: BgValueW),
-                HelpDot("cd.bg", "cd.help.bg", "cd.sec.bar")),
+            DisplayModeRow(),   // Plugin.Settings.Placed.cs
+            new ConditionalElement(() => _placedMode, PlacedSizeRow(), BackgroundRow()),
             SettingRow(
                 new CellElement(new TextElement(() => _loc.T("cd.showHidden"), Color: () => TextColor(), NoWrap: true)
                     { Ellipsize = true }, Weight: 1f),
                 OnOffChip(() => _showHidden, SetShowHidden),
-                HelpDot("cd.showHidden", "cd.help.hidden", "cd.sec.bar")),
+                HelpDot("cd.showHidden", "cd.help.hidden", "cd.sec.display")),
         });
+
+    private HudElement BackgroundRow() => SettingRow(
+        new CellElement(new TextElement(() => _loc.T("cd.bg"), Color: () => TextColor(), NoWrap: true)
+            { Ellipsize = true }, Width: BgLabelW),
+        new CellElement(RoundSlider(() => _bgOpacity, SetBgOpacity, 0f, 1f), Weight: 1f),
+        new CellElement(new TextElement(BgPercent, Color: () => TextColor(), Align: TextAlign.Right, NoWrap: true,
+            FontSize: 13) { Bold = true }, Width: BgValueW),
+        HelpDot("cd.bg", "cd.help.bg", "cd.sec.display"));
 
     // A 28 px row: a fixed strut pins the height, the real content sits in one weighted cell. The strut lives in its OWN
     // fixed cell beside the content (a zero-width SpacerElement inside a RowElement is stretchy and would steal width

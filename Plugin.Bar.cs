@@ -22,7 +22,7 @@ public sealed partial class Plugin
     private static readonly ColorRgba ChargeCol   = new(1.00f, 0.84f, 0.35f, 1f);   // #FFD75A
 
     // Per-slot UV stash — Load* returns the sub-rect via out param; the tile's Uv Func reads it.
-    private readonly UvRect[] _uv = new UvRect[MaxTiles];
+    private readonly UvRect[] _uv = new UvRect[TileCap];
 
     private const int MaxTilesPerRow = MaxTiles / MaxRows;
     private const float GearGlyph    = 16f;

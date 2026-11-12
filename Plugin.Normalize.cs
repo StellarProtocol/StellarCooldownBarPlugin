@@ -23,8 +23,8 @@ public sealed partial class Plugin
 
     private void InitNormalize() => _normPersisted = _cfg.Get("track.normalized", 0) >= NormalizeVersion;
 
-    // Who needs the tables before Settings opens.
-    private bool NeedEagerTables => !_normPersisted;
+    // Who needs the tables before Settings opens: the first conversion, and Placed mode (its set is built from the groups).
+    private bool NeedEagerTables => !_normPersisted || _placedMode;
 
     // OnUpdate: a couple of bool tests in the common case. Loaded → only the (rate-limited) conversion, until it ran;
     // not loaded → load only when someone needs the tables now.
@@ -78,6 +78,7 @@ public sealed partial class Plugin
             ApplySkillTabFilter(_stFilter);
             ApplyDebuffTabFilter(_dtFilter);
             ApplyBuffTabFilter(_btFilter);
+            OnTrackedChanged();   // Plugin.Placed.cs — the placed set follows
         }
         _services.Log.Info($"[CooldownBar] saved tracked ids normalised: converted {converted}, dropped {dropped}");
     }

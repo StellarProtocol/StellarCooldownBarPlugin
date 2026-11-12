@@ -50,7 +50,8 @@ public sealed partial class Plugin
         return SectionPanel(() => _loc.T("cd.sec.show"), ShowHint, new HudElement[]
         {
             new RowElement(new HudElement[] { KindChip(0), KindChip(1), KindChip(2) }, Gap: 4f),
-            new RowElement(new HudElement[]
+            // Placed mode forces Only ticked: the chips give way to a one-line note (same 24 px row).
+            new ConditionalElement(() => _placedMode, PlacedNoteRow(), new RowElement(new HudElement[]
             {
                 ChoiceChip("cd.mode.only",   () => ActiveTabMode() == TrackMode.IncludeOnly,
                     () => SetActiveTabMode(TrackMode.IncludeOnly), ModeChipW),
@@ -58,7 +59,7 @@ public sealed partial class Plugin
                     () => SetActiveTabMode(TrackMode.ExcludeBelow), ModeChipW),
                 new SpacerElement(0f),   // flexible: the "?" lands on the panel's right edge
                 HelpDot("cd.filterMode", "cd.help.mode", "cd.sec.show"),
-            }, Gap: 4f),
+            }, Gap: 4f)),
             new RowElement(new HudElement[]
             {
                 // One field for all kinds: Get returns the ACTIVE kind's filter, so a switch re-seeds it with that
@@ -184,6 +185,7 @@ public sealed partial class Plugin
     // "632 skills" with no search, "48 / 312 debuffs" while searching.
     private string ShowHint()
     {
+        if (_placedMode) return PlacedHint();   // "N / 30 placed" (Plugin.Settings.Placed.cs)
         int total = _activeTab == 0 ? _stCount : _activeTab == 1 ? _dtCount : _btCount;
         bool searching = !string.IsNullOrWhiteSpace(SelFilter);
         string key = _activeTab == 0 ? (searching ? "cd.count.skills"  : "cd.hint.skills")

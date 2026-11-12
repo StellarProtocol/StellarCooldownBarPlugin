@@ -70,7 +70,7 @@ public sealed partial class Plugin
     private void EnsureSkillTabLoaded()
     {
         if (!_stBaseLoaded) { LoadSettingsSkillTable(); _stBaseLoaded = _stBaseIds.Length > 0; _seenDirty = true; }
-        if (_stBaseLoaded && _seenDirty) { RebuildMergedSkills(); ApplySkillTabFilter(_stFilter); _seenDirty = false; }
+        if (_stBaseLoaded && _seenDirty) { RebuildMergedSkills(); ApplySkillTabFilter(_stFilter); _seenDirty = false; OnTrackedChanged(); }
     }
 
     // Fold bar-seen skills (placeholder-named / SkillTable-absent) into the Skills tab so every cooldown that can
@@ -98,6 +98,7 @@ public sealed partial class Plugin
         if (_buffTabLoaded) return;
         LoadSettingsBuffTable();
         _buffTabLoaded = _dtCount > 0 || _btCount > 0;
+        if (_buffTabLoaded) OnTrackedChanged();   // new groups → the placed set re-syncs (Plugin.Placed.cs)
         if (_dtCount > 0) ApplyDebuffTabFilter(_dtFilter);
         if (_btCount > 0) ApplyBuffTabFilter(_btFilter);
     }

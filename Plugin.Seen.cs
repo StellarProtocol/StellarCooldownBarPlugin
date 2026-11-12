@@ -37,8 +37,8 @@ public sealed partial class Plugin
     private int _arrivalSeq;
     private TileComparer? _tileComparer;
 
-    // A _tiles index a tile Func may read: a live tile of the current snapshot.
-    private bool SlotValid(int idx) => (uint)idx < (uint)_tileCount;
+    // A _tiles index a tile Func may read: a live tile of the current snapshot, or a placed effect's edit-mode sample.
+    private bool SlotValid(int idx) => (uint)idx < (uint)_tileCount || IsSampleSlot(idx);   // + Plugin.Placed.cs samples
 
     private int _tilesPerRow;     // tiles that fit in current width (capped at MaxTiles/MaxRows)
     private int _rowsVisible;     // rows that fit in current height (1 or MaxRows)
@@ -70,8 +70,8 @@ public sealed partial class Plugin
         return rt;
     }
 
-    private float BarWidth  { get { var rt = BarRt(); return rt != null ? rt.rect.width  : _bar.Rect.Width;  } }
-    private float BarHeight { get { var rt = BarRt(); return rt != null ? rt.rect.height : _bar.Rect.Height; } }
+    private float BarWidth  { get { var rt = BarRt(); return rt != null ? rt.rect.width  : _bar?.Rect.Width ?? 0f;  } }
+    private float BarHeight { get { var rt = BarRt(); return rt != null ? rt.rect.height : _bar?.Rect.Height ?? 0f; } }
 
     private void UpdateArrivalOrder(int n)
     {
@@ -98,9 +98,12 @@ public sealed partial class Plugin
         long now = Environment.TickCount64;   // the bar's one clock (TrackedTile.SampleTick, BuffTrackEntry.SnapTick)
         _cdGen++;                             // Plugin.Smooth.cs — stamps live cooldown state; the rest is pruned below
 
-        bool skillExclude  = _selection.SkillMode  == TrackMode.ExcludeBelow;
-        bool debuffExclude = _selection.DebuffMode == TrackMode.ExcludeBelow;
-        bool buffExclude   = _selection.BuffMode   == TrackMode.ExcludeBelow;
+        // Placed mode FORCES "Only ticked" and keeps only the PLACED effects (a ticked 31st is not drawn); each kind's
+        // own mode is untouched and applies again in Bar mode.
+        bool placed        = _placedMode;
+        bool skillExclude  = !placed && _selection.SkillMode  == TrackMode.ExcludeBelow;
+        bool debuffExclude = !placed && _selection.DebuffMode == TrackMode.ExcludeBelow;
+        bool buffExclude   = !placed && _selection.BuffMode   == TrackMode.ExcludeBelow;
 
         foreach (var entry in SkillCDPatch.ActiveCDs.Values)
         {
@@ -108,7 +111,7 @@ public sealed partial class Plugin
             int baseId = ResolveNamedBaseSkill(entry.SkillId);
             if (baseId == 0) continue;
             if (_seenSkillIds.Add(baseId)) _seenDirty = true;   // fold into the Skills filter list (before the exclude gate, so excluded skills stay toggleable)
-            bool inList = _selection.IsCooldownTracked(baseId);
+            bool inList = placed ? IsPlacedMember(TileKind.Cooldown, baseId) : _selection.IsCooldownTracked(baseId);
             if (skillExclude ? inList : !inList) continue;
             float rem = SkillCDPatch.GetRemainSec(entry);
             if (rem <= 0f) continue;
@@ -131,8 +134,9 @@ public sealed partial class Plugin
             {
                 _selection.AutoTrackImagine(entry.BuffBaseId);
                 _selVersion++;   // the picker's ticked counts / row ticks recompute (Plugin.Settings.Rows.cs)
+                OnTrackedChanged();   // Plugin.Placed.cs — a newly ticked lockout gets its placed tile
             }
-            bool dbInList = _selection.IsDebuffTracked(entry.BuffBaseId);
+            bool dbInList = placed ? IsPlacedMember(TileKind.Debuff, entry.BuffBaseId) : _selection.IsDebuffTracked(entry.BuffBaseId);
             if (debuffExclude ? dbInList : !dbInList) continue;
 
             // Icon skill = the resolved Battle-Imagine CARD for a lockout (e.g. Mechanical Failure -> 3971), else the
@@ -150,7 +154,7 @@ public sealed partial class Plugin
             if (entry.BuffType == 0) continue;                               // only buffs (not debuffs)
             if (!_showHidden && entry.Hidden) continue;  // off-mode skips internal/hidden buffs (empty game Name OR empty Icon) — matches the settings list gate
             if (entry.Duration > 0 && entry.RemainSec < 0.05f) continue;
-            bool bfInList = _selection.IsBuffTracked(entry.BuffBaseId);
+            bool bfInList = placed ? IsPlacedMember(TileKind.Buff, entry.BuffBaseId) : _selection.IsBuffTracked(entry.BuffBaseId);
             if (buffExclude ? bfInList : !bfInList) continue;
 
             _tiles[n++] = new TrackedTile(TileKind.Buff, entry.BuffBaseId, false, entry.SkillId,
@@ -160,6 +164,13 @@ public sealed partial class Plugin
         UpdateArrivalOrder(n);
         _tileComparer ??= new TileComparer(_arrivalOrder);
         if (n > 1) Array.Sort(_tiles, 0, n, _tileComparer);
+        if (placed)
+        {
+            // Every placed tile, not just what fits the bar's rows; each placed window then picks its tile index.
+            _totalTileCount = _tileCount = n;
+            AssignPlacedTiles(n);   // Plugin.Placed.cs
+            return;
+        }
         _tilesPerRow    = ComputeTilesPerRow();
         _rowsVisible    = ComputeRowsVisible();
         _totalTileCount = n;

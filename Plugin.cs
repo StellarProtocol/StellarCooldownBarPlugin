@@ -20,7 +20,7 @@ public sealed partial class Plugin : IStellarPlugin
     private readonly IConfigSection _cfg;
     private readonly CooldownBarSelection _selection;
     private readonly DebuffAttribution _attr;
-    private readonly IWindowControl _bar;
+    private IWindowControl? _bar;              // null in Placed mode (Plugin.Placed.cs)
     private readonly IWindowControl _settings;
     private readonly IWindowControl _tooltip;
     private readonly IHotkeyAction _toggleAction;
@@ -54,35 +54,19 @@ public sealed partial class Plugin : IStellarPlugin
         _attr = new DebuffAttribution(
             buffSkillId:    id => _services.GameData.Combat.GetBuff(id)?.SkillId ?? 0,
             imagineSkillOf: sk => _services.ResonanceData.GetImagineForSkill(sk)?.SkillId ?? 0);
-        _tiles = new TrackedTile[MaxTiles];
+        _tiles = new TrackedTile[TileCap];   // live tiles + one edit-mode sample per placed effect (Plugin.Placed.cs)
         SkillCDPatch.Install(_services.Harmony.Create("skillcd"), _services.Log.Info);
         BuffTrackPatch.Install(_services.Harmony.Create("buff"), _services.Log.Info,
             () => _services.CombatSnapshot.ServerNowMs);   // framework server clock (Server-Clock-and-Ping-HUD.md)
 
         InitBarMigration();   // Plugin.Bar.Frame.cs — one-time saved-height → row-count mapping for the taller tile
-        // Borderless window (chrome-less, HUD-like) via WindowBuilder — the icon-capable render path. Its rounded theme
-        // panel is the root Image, restyled by Plugin.Bar.Frame.cs (no WindowSpec.BackgroundOpacity: that painted it
-        // black). Height limits = exactly 1 and 3 tile rows (BarHeightFor, Plugin.Seen.cs); MinWidth 150 still fits two
-        // 50 px tiles (2·50 + 6 + 2·12 = 130).
-        _bar = _services.Windows.Register(new WindowRegistration(
-            new WindowSpec(
-                Id:          "cooldownbar.main",
-                Title:       _loc.T("cd.window.title"),
-                DefaultRect: new WindowRect(897f, 940f, 320f, BarHeightFor(1)),
-                Category:    WindowCategory.HUD,
-                Style:       WindowPanelStyle.Borderless)
-            { StartVisible = true, Draggable = true,
-              EditModeDragOnly = true,
-              // In-world HUD: draw only in the World phase, and hide behind blocking overlays (old AutoHideBehindGameMenus)
-              // and the line-selector / any menu.
-              ShouldRender = () => _services.ClientState.Phase == GamePhase.World
-                                   && (_services.ClientState.UiState & (GameUIState.Blocking | GameUIState.AnyMenu)) == 0
-                                   && !_perfOff,   // [CdPerf] in-session off control (always false unless probe on)
-              Resizable = true, MinWidth = 150f, MaxWidth = 1600f,
-              MinHeight = BarHeightFor(1), MaxHeight = BarHeightFor(MaxRows) },
-            BuildRoot()));
+        InitPlaced();         // Plugin.Placed.cs — display mode, size, placement order, per-effect sizes
+        // Bar mode only: in Placed mode the bar is not registered at all (a removed window also leaves the layout
+        // editor; a hidden one would still be force-shown there). Placed windows register once the tables are loaded.
+        if (!_placedMode) _bar = RegisterBar();
 
         _helpWindow = RegisterHelpWindow();   // before Settings: its "?" buttons read _helpWindow on every refresh
+        _sizePop    = RegisterSizePopover();  // Plugin.Settings.Placed.cs — the per-effect size picker
         _settings = BuildAndRegisterSettings();
         _tooltip  = BuildAndRegisterTooltip();
 
@@ -110,6 +94,29 @@ public sealed partial class Plugin : IStellarPlugin
         _services.Framework.Update += OnUpdate;
     }
 
+    // Borderless window (chrome-less, HUD-like) via WindowBuilder — the icon-capable render path. Its rounded theme
+    // panel is the root Image, restyled by Plugin.Bar.Frame.cs (no WindowSpec.BackgroundOpacity: that painted it
+    // black). Height limits = exactly 1 and 3 tile rows (BarHeightFor, Plugin.Seen.cs); MinWidth 150 still fits two
+    // 50 px tiles (2·50 + 6 + 2·12 = 130). Re-registered (same id → saved rect) when switching back from Placed mode.
+    private IWindowControl RegisterBar()
+        => _services.Windows.Register(new WindowRegistration(
+            new WindowSpec(
+                Id:          "cooldownbar.main",
+                Title:       _loc.T("cd.window.title"),
+                DefaultRect: new WindowRect(897f, 940f, 320f, BarHeightFor(1)),
+                Category:    WindowCategory.HUD,
+                Style:       WindowPanelStyle.Borderless)
+            { StartVisible = true, Draggable = true,
+              EditModeDragOnly = true,
+              // In-world HUD: draw only in the World phase, and hide behind blocking overlays (old AutoHideBehindGameMenus)
+              // and the line-selector / any menu.
+              ShouldRender = () => _services.ClientState.Phase == GamePhase.World
+                                   && (_services.ClientState.UiState & (GameUIState.Blocking | GameUIState.AnyMenu)) == 0
+                                   && !_perfOff,   // [CdPerf] in-session off control (always false unless probe on)
+              Resizable = true, MinWidth = 150f, MaxWidth = 1600f,
+              MinHeight = BarHeightFor(1), MaxHeight = BarHeightFor(MaxRows) },
+            BuildRoot()));
+
     public void Dispose()
     {
         FlushBgSave();   // an opacity drag released just before unload still persists
@@ -120,8 +127,10 @@ public sealed partial class Plugin : IStellarPlugin
         _toggleAction.Dispose();
         _tooltip.Remove();
         _helpWindow.Remove();
+        _sizePop.Remove();
         _settings.Remove();
-        _bar.Remove();
+        _bar?.Remove();
+        RemoveAllPlaced();  // Plugin.Placed.cs
         DisposeBarFrame();  // Plugin.Bar.Frame.cs — the baked panel sprite
         ClearBarCaches();   // Plugin.Bar.Cache.cs
     }
@@ -139,7 +148,13 @@ public sealed partial class Plugin : IStellarPlugin
         // RefreshActiveBuffs walks the buff lists via reflection; running it every frame (even while the bar is
         // hidden) was a steady combat-time GC source. The window's Funcs still draw every frame from the last-built
         // _tiles samples, so the bar stays smooth; only the data refresh throttles.
-        if (_bar.IsShown && !_perfOff)
+        // Placed mode: the same 10 Hz read while any placed tile COULD show (in world, no menu, or the layout editor) —
+        // the placed windows are hidden until their effect is active, so their own IsShown can't gate it.
+        bool barLive = _bar != null && _bar.IsShown && !_perfOff;
+        bool placedLive = PlacedLive();   // Plugin.Placed.cs — false in Bar mode
+        if (!placedLive && _placedLive) ClearPlacedTiles();   // gate closed: no stale tile may show on the next open
+        _placedLive = placedLive;
+        if (barLive || placedLive)
         {
             _rebuildAccum += deltaTime;
             if (_rebuildAccum >= RebuildIntervalS)
@@ -154,10 +169,14 @@ public sealed partial class Plugin : IStellarPlugin
                 RebuildSnapshot();             // Plugin.Seen.cs
                 CdPerf.End(CdPerf.Refresh, perfRefresh);
             }
-            TickBarFrame();                    // Plugin.Bar.Frame.cs — re-style a remounted root, live panel colour
-            TickBarMigration(deltaTime);       // one-time; a single compare once done
+            if (barLive)
+            {
+                TickBarFrame();                // Plugin.Bar.Frame.cs — re-style a remounted root, live panel colour
+                TickBarMigration(deltaTime);   // one-time; a single compare once done
+            }
         }
         TickEagerTables();        // Plugin.Normalize.cs — table load + stale-id conversion, until done
+        TickPlaced();             // Plugin.Placed.cs — placed-window sync on a selection change, edit-mode icon fade
         if (TranslatedBuffText.ConsumeLoaded(out var loadMsg)) OnTranslatedTextLoaded(loadMsg);   // one int read/frame
         BgSaveTick();             // Plugin.Settings.cs — debounced config write after an opacity-slider drag
         TickTooltipPlace();       // Plugin.Tooltip.cs — re-assert cursor rect after destroy-on-hide remount

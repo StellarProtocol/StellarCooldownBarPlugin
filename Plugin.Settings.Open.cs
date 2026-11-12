@@ -95,12 +95,14 @@ public sealed partial class Plugin
         _settingsCentre?.Stop();
         CancelUntickAll();
         CloseHelp();
+        CloseSizePopover();   // Plugin.Settings.Placed.cs
     }
 
     // OnUpdate: the help popover re-anchor, the centring burst and the confirm timeout. Each is a single compare when idle.
     private void TickSettingsUi()
     {
         HelpRepositionTick();
+        SizePopRepositionTick();
         _settingsCentre?.Tick();
         AdvanceUntickConfirm();   // Plugin.Settings.Feedback.cs
     }

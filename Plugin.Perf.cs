@@ -45,6 +45,6 @@ public sealed partial class Plugin
                 _services.Log.Info($"[CdPerf] CooldownBar control switch: {(off ? "OFF (refresh skipped, bar hidden)" : "ON")}");
             }
         }
-        CdPerf.MaybeFlush(_perfLog!, _bar.IsShown, _perfOff);
+        CdPerf.MaybeFlush(_perfLog!, _bar != null ? _bar.IsShown : _placedLive, _perfOff);
     }
 }

@@ -32,7 +32,8 @@ public sealed partial class Plugin
     private int[]    SelFiltIds   => _activeTab == 0 ? _stFiltIds   : _activeTab == 1 ? _dtFiltIds   : _btFiltIds;
     private string[] SelFiltNames => _activeTab == 0 ? _stFiltNames : _activeTab == 1 ? _dtFiltNames : _btFiltNames;
     private string   SelFilter    => _activeTab == 0 ? _stFilter    : _activeTab == 1 ? _dtFilter    : _btFilter;
-    private bool     SelExcludeMode => ActiveTabMode() == TrackMode.ExcludeBelow;
+    // Placed mode forces "Only ticked" (each kind's own mode is kept for Bar mode).
+    private bool     SelExcludeMode => !_placedMode && ActiveTabMode() == TrackMode.ExcludeBelow;
     private ColorRgba SelKindColor  => _activeTab == 0 ? CooldownCol : _activeTab == 1 ? DebuffCol : BuffCol;
 
     // Bound once (a method-group conversion allocates a delegate each time it is written).
@@ -140,12 +141,16 @@ public sealed partial class Plugin
                     { Ellipsize = true, Strikethrough = true },
                 new TextElement(() => SlotName(slot), Color: () => TextColor(), NoWrap: true) { Ellipsize = true })
                 { Prebuild = true }, Weight: 1f),
-            // Right column: muted ×N / "hidden", or for ~1 s after a click on this row the bold green "Added" /
-            // "Removed" (bold can't toggle live → two texts). Same fixed cell, so the swap never moves the name.
+            // Right column: muted ×N / "hidden" / amber "not placed", or (Placed mode, a placed row) the size chip, or for
+            // ~1 s after a click on this row the bold green "Added" / "Removed" (amber "30 max" when Placed mode is full).
+            // Bold can't toggle live → separate texts. Same fixed cell, so a swap never moves the name.
             new CellElement(new ConditionalElement(() => SlotFlashing(slot),
                 new TextElement(SelFlashLabel, Color: () => SelFlashTextColor(), Align: TextAlign.Right, NoWrap: true,
                     FontSize: 13) { Bold = true },
-                new TextElement(() => SlotRightLabel(slot), Color: () => MutedText(), Align: TextAlign.Right, NoWrap: true))
+                new ConditionalElement(() => SlotPlaced(slot), RowSizeChip(slot),   // Plugin.Settings.Placed.cs
+                    new TextElement(() => SlotRightLabel(slot),
+                        Color: () => SlotNotPlaced(slot) ? AmberText() : MutedText(), Align: TextAlign.Right, NoWrap: true)
+                        { Ellipsize = true }) { Prebuild = true })
                 { Prebuild = true }, Width: SelValueColW),
             new SpacerElement(2f, 1f),               // right inset
         }, Gap: 6f),
@@ -162,7 +167,7 @@ public sealed partial class Plugin
     // hover lightens whichever.
     private ColorRgba EffectTileFill(int slot)
     {
-        var fill = SlotFlashing(slot)  ? Over(SuccessColor() with { A = FlashWashAlpha }, TileColor())
+        var fill = SlotFlashing(slot)  ? Over(SelFlashColor() with { A = FlashWashAlpha }, TileColor())
                  : !SlotTicked(slot)   ? TileColor()
                  : SelExcludeMode      ? Over(DangerColor() with { A = DangerWashAlpha }, TileColor())
                  :                       Over(SelKindColor with { A = RowWashAlpha }, TileColor());
@@ -221,6 +226,7 @@ public sealed partial class Plugin
     private string SlotRightLabel(int slot)
     {
         if (SlotHidden(slot)) return _loc.T("cd.sel.hidden");
+        if (SlotNotPlaced(slot)) return _loc.T("cd.sel.notPlaced");   // Placed mode, over the 30 cap (amber)
         int i = SelOffset + slot;
         if (_activeTab == 0 || i >= SelFiltCount) return string.Empty;
         int n = (_activeTab == 1 ? _dtFiltMembers : _btFiltMembers)[i].Length;
@@ -266,6 +272,14 @@ public sealed partial class Plugin
         }
         _selection.Save(_cfg);
         _selVersion++;
-        OnEffectToggled(_activeTab, SelFiltIds[i], SelFiltNames[i], on);   // Plugin.Settings.Feedback.cs
+        OnTrackedChanged();   // Plugin.Placed.cs
+        // Placed mode: sync now (not on the next tick) — the feedback needs to know whether a new tick got a tile.
+        bool full = false;
+        if (_placedMode && _stBaseLoaded && _buffTabLoaded)
+        {
+            SyncPlaced();
+            full = on && !_placedKeys.Contains(PKey(ActiveKind, SelFiltIds[i]));
+        }
+        OnEffectToggled(_activeTab, SelFiltIds[i], SelFiltNames[i], on, full);   // Plugin.Settings.Feedback.cs
     }
 }
