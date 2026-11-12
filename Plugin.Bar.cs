@@ -133,14 +133,12 @@ public sealed partial class Plugin
         };
     }
 
-    // Per-frame fill, extrapolated from the tile's last 10 Hz sample (TrackedTile.FillAt). Quantized to 1/88 (half a
-    // canvas px of the 44 px foot bar — invisible) so a slow timer doesn't re-mesh its tile every frame
-    // (Plugin-Performance-Rules.md §5: the tile's graphic only changes when the shown fill moves).
-    private const float FillSteps = 88f;
+    // Per-frame fill, extrapolated from the tile's last 10 Hz sample (TrackedTile.FillAt). Not quantized: the user
+    // chose smooth fills without pixel rounding (2026-11-12, "smooth, no item 8").
     private float TileFill(int idx)
     {
         if (idx >= _tileCount) return 0f;
-        return MathF.Round(_tiles[idx].FillAt(Environment.TickCount64) * FillSteps) / FillSteps;
+        return _tiles[idx].FillAt(Environment.TickCount64);
     }
 
     // Resolved display name for a tile — the source for the icon-less fallback badge. Skills use the game name;
