@@ -193,4 +193,25 @@ public sealed partial class Plugin
             return _s;
         }
     }
+
+    // The same for string arguments (already-composed parts, e.g. FmtCache outputs): rebuilt only when the template or
+    // an argument changed. Arguments are compared by REFERENCE — a FmtCache hands back the same instance until its own
+    // inputs change, so an idle refresh is three pointer compares.
+    private sealed class StrFmtCache
+    {
+        private string? _tpl, _a, _b, _c;
+        private string _s = string.Empty;
+
+        public string Get(string tpl, string a, string? b = null, string? c = null)
+        {
+            if (!ReferenceEquals(a, _a) || !ReferenceEquals(b, _b) || !ReferenceEquals(c, _c)
+                || !string.Equals(tpl, _tpl, StringComparison.Ordinal))
+            {
+                _tpl = tpl; _a = a; _b = b; _c = c;
+                try { _s = string.Format(CultureInfo.CurrentCulture, tpl, a, b, c); }
+                catch (FormatException) { _s = tpl; }
+            }
+            return _s;
+        }
+    }
 }

@@ -71,9 +71,15 @@ public sealed partial class Plugin
         ? _selFooterNote
         : SelActiveTicked < 0 ? PendingText : _selFooterFmt.Get(_loc.T("cd.sel.footer"), SelActiveTicked);
 
-    private string UntickQuestion() => _selConfirmFmt.Get(
-        _loc.T(_activeTab == 0 ? "cd.sel.confirm.skills" : _activeTab == 1 ? "cd.sel.confirm.debuffs" : "cd.sel.confirm.buffs"),
-        SelActiveTicked);
+    // "Untick all 4 skills?" / "Untick 1 skill?" (a ".one" key for exactly one, like the header's count phrases).
+    private string UntickQuestion()
+    {
+        int n = SelActiveTicked;
+        string key = _activeTab == 0 ? (n == 1 ? "cd.sel.confirm.skills.one"  : "cd.sel.confirm.skills")
+                   : _activeTab == 1 ? (n == 1 ? "cd.sel.confirm.debuffs.one" : "cd.sel.confirm.debuffs")
+                   :                   (n == 1 ? "cd.sel.confirm.buffs.one"   : "cd.sel.confirm.buffs");
+        return _selConfirmFmt.Get(_loc.T(key), n);
+    }
 
     // What the bar does once nothing is ticked depends on the mode: "Only ticked" → it shows none of this kind;
     // "All except ticked" → nothing is hidden any more.

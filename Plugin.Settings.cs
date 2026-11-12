@@ -71,33 +71,41 @@ public sealed partial class Plugin
     // Opening / closing / the per-tick UI work: Plugin.Settings.Open.cs.
 
     // ── header status ─────────────────────────────────────────────────────────────────────────────────────────────
-    private readonly FmtCache _statusFmt = new();
-    private readonly FmtCache[] _statusPartFmt = { new(), new(), new() };
-    private string? _statusP0, _statusP1, _statusP2;
-    private string _statusMixed = string.Empty;
+    private readonly FmtCache[] _countFmt = { new(), new(), new() };
+    private readonly StrFmtCache _statusFmt = new();
+    private readonly StrFmtCache[] _statusPartFmt = { new(), new(), new() };
+    private readonly StrFmtCache _statusMixedFmt = new();
+
+    // "1 skill" / "2 skills" per kind: a ".one" key for exactly 1 (en inflects; the other locales give both keys the same
+    // text). Cached per kind, so the same instance comes back until the count or the language changes.
+    private string CountPhrase(int kind, int n)
+    {
+        string key = kind == 0 ? (n == 1 ? "cd.n.skills.one"  : "cd.n.skills")
+                   : kind == 1 ? (n == 1 ? "cd.n.debuffs.one" : "cd.n.debuffs")
+                   :             (n == 1 ? "cd.n.buffs.one"   : "cd.n.buffs");
+        return _countFmt[kind].Get(_loc.T(key), n);
+    }
 
     // The ticked count per kind (the kind chips show the same numbers), worded by each kind's mode: a kind in
     // "All except ticked" HIDES its ticked effects. All three in one mode → one verb: "Showing 2 skills · 11 debuffs ·
-    // 342 buffs" / "Hiding …"; mixed → a verb per kind: "Showing 2 skills · Hiding 4 debuffs · Showing 10 buffs".
-    // Each part is a cached format; the joined line is rebuilt only when a part string changed (reference compare).
+    // 342 buffs" / "Hiding …"; mixed → a verb per kind: "Showing 1 skill · Hiding 4 debuffs · Showing 10 buffs".
+    // The count phrases are cached formats and the lines on top compare them by reference: nothing is composed per refresh.
     private string SettingsStatus()
     {
-        if (_placedMode) return PlacedStatus();       // "Placed: N effects on screen" (Plugin.Settings.Placed.cs)
+        if (_placedMode) return PlacedStatus();       // "Placed: N effects" (Plugin.Settings.Placed.cs)
         if (!TickCountsReady) return PendingText;   // Plugin.Settings.Rows.cs — grouped counts only, never raw ids
         bool hs = _selection.SkillMode  == TrackMode.ExcludeBelow;
         bool hd = _selection.DebuffMode == TrackMode.ExcludeBelow;
         bool hb = _selection.BuffMode   == TrackMode.ExcludeBelow;
+        var n0 = CountPhrase(0, _stTicked);
+        var n1 = CountPhrase(1, _dtTicked);
+        var n2 = CountPhrase(2, _btTicked);
         if (hs == hd && hd == hb)
-            return _statusFmt.Get(_loc.T(hs ? "cd.settings.status.hide" : "cd.settings.status"), _stTicked, _dtTicked, _btTicked);
-        var p0 = _statusPartFmt[0].Get(_loc.T(hs ? "cd.status.hide.skills"  : "cd.status.show.skills"),  _stTicked);
-        var p1 = _statusPartFmt[1].Get(_loc.T(hd ? "cd.status.hide.debuffs" : "cd.status.show.debuffs"), _dtTicked);
-        var p2 = _statusPartFmt[2].Get(_loc.T(hb ? "cd.status.hide.buffs"   : "cd.status.show.buffs"),   _btTicked);
-        if (!ReferenceEquals(p0, _statusP0) || !ReferenceEquals(p1, _statusP1) || !ReferenceEquals(p2, _statusP2))
-        {
-            _statusP0 = p0; _statusP1 = p1; _statusP2 = p2;
-            _statusMixed = p0 + " · " + p1 + " · " + p2;
-        }
-        return _statusMixed;
+            return _statusFmt.Get(_loc.T(hs ? "cd.settings.status.hide" : "cd.settings.status"), n0, n1, n2);
+        var p0 = _statusPartFmt[0].Get(_loc.T(hs ? "cd.status.hide" : "cd.status.show"), n0);
+        var p1 = _statusPartFmt[1].Get(_loc.T(hd ? "cd.status.hide" : "cd.status.show"), n1);
+        var p2 = _statusPartFmt[2].Get(_loc.T(hb ? "cd.status.hide" : "cd.status.show"), n2);
+        return _statusMixedFmt.Get("{0} · {1} · {2}", p0, p1, p2);
     }
 
     // ── DISPLAY panel ─────────────────────────────────────────────────────────────────────────────────────────────
