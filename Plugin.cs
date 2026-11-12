@@ -100,7 +100,7 @@ public sealed partial class Plugin : IStellarPlugin
             Title:   "CooldownBar",
             IconPng: LoadIconPng(),
             IconKey: null,
-            OnOpen:  () => _settings.SetVisible(true))
+            OnOpen:  OpenSettingsFromLauncher)
         { Group = LauncherGroup.Plugin,
           // Re-localize the tile DISPLAY on a language change; Title above never changes (pin identity).
           TitleProvider = () => _loc.T("cd.launcher.title"),
@@ -159,7 +159,7 @@ public sealed partial class Plugin : IStellarPlugin
         if (TranslatedBuffText.ConsumeLoaded(out var loadMsg)) OnTranslatedTextLoaded(loadMsg);   // one int read/frame
         BgSaveTick();             // Plugin.Settings.cs — debounced config write after an opacity-slider drag
         TickTooltipPlace();       // Plugin.Tooltip.cs — re-assert cursor rect after destroy-on-hide remount
-        TickSettingsUi();         // Plugin.Settings.cs — help re-anchor + Untick-all confirm timeout
+        TickSettingsUi();         // Plugin.Settings.Open.cs — help re-anchor, open centring, Untick-all confirm timeout
         LogSnapshotDiag(deltaTime);   // Plugin.Diagnostics.cs — gated on STELLAR_DIAGNOSTICS
         if (CdPerf.On) PerfTick(deltaTime, perfUpdate);   // Plugin.Perf.cs
     }

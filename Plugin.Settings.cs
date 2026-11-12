@@ -67,26 +67,7 @@ public sealed partial class Plugin
         BuildShowSection(),   // Plugin.Settings.Show.cs
     }, Gap: SettingsGap);
 
-    // F8 / the bar's gear: toggle. Hiding also drops the help tip and a pending confirm.
-    private void ToggleSettings()
-    {
-        if (_settings.IsShown) CloseSettings();
-        else _settings.SetVisible(true);
-    }
-
-    private void CloseSettings()
-    {
-        _settings.SetVisible(false);
-        CancelUntickAll();
-        CloseHelp();
-    }
-
-    // OnUpdate: the help popover re-anchor and the confirm timeout. Each is a single compare when idle.
-    private void TickSettingsUi()
-    {
-        HelpRepositionTick();
-        AdvanceUntickConfirm();   // Plugin.Settings.Feedback.cs
-    }
+    // Opening / closing / the per-tick UI work: Plugin.Settings.Open.cs.
 
     // ── header status ─────────────────────────────────────────────────────────────────────────────────────────────
     private readonly FmtCache _statusFmt = new();
