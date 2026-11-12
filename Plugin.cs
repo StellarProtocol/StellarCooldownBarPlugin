@@ -39,6 +39,10 @@ public sealed partial class Plugin : IStellarPlugin
     // the full unfiltered buff list, so internal/icon-less effects can be tracked. Persisted in config.
     private bool _showHidden;
 
+    // "Hide when empty" (Bar mode): the bar doesn't draw while it has no active tile, except in the layout editor.
+    // Position/size untouched (ShouldRender only). Persisted in config, default off.
+    private bool _hideEmpty;
+
     public Plugin(IPluginServices services)
     {
         _services = services;
@@ -47,6 +51,7 @@ public sealed partial class Plugin : IStellarPlugin
         InitPerf();   // Plugin.Perf.cs — diagnostics-gated [CdPerf] probe; must precede BuildRoot
         _bgOpacity = _cfg.Get("bar.bg_opacity", 0f);
         _showHidden = _cfg.Get("bar.show_hidden", false);
+        _hideEmpty  = _cfg.Get("bar.hide_empty", false);
         BuffTrackPatch.ShowHidden = _showHidden;               // full-vs-showed buff list source for the bar
         TranslatedBuffText.EnsureLoaded();   // English NameDesign labels — parsed on a background task; OnUpdate polls ConsumeLoaded
         _selection = CooldownBarSelection.Load(_cfg);
@@ -110,12 +115,21 @@ public sealed partial class Plugin : IStellarPlugin
               EditModeDragOnly = true,
               // In-world HUD: draw only in the World phase, and hide behind blocking overlays (old AutoHideBehindGameMenus)
               // and the line-selector / any menu.
-              ShouldRender = () => _services.ClientState.Phase == GamePhase.World
-                                   && (_services.ClientState.UiState & (GameUIState.Blocking | GameUIState.AnyMenu)) == 0
-                                   && !_perfOff,   // [CdPerf] in-session off control (always false unless probe on)
+              ShouldRender = () => BarGateOpen()
+                                   && !_perfOff              // [CdPerf] in-session off control (always false unless probe on)
+                                   && !BarHiddenWhenEmpty,   // "Hide when empty": a few bool/int reads, no allocation
               Resizable = true, MinWidth = 150f, MaxWidth = 1600f,
               MinHeight = BarHeightFor(1), MaxHeight = BarHeightFor(MaxRows) },
             BuildRoot()));
+
+    // The bar's game-state gate: in the World phase, no blocking overlay, no menu / line selector.
+    private bool BarGateOpen()
+        => _services.ClientState.Phase == GamePhase.World
+           && (_services.ClientState.UiState & (GameUIState.Blocking | GameUIState.AnyMenu)) == 0;
+
+    // "Hide when empty" is holding the bar back: no active tile, and not in the layout editor (there the empty bar
+    // shows, so it can be moved and resized).
+    private bool BarHiddenWhenEmpty => _hideEmpty && _totalTileCount == 0 && !_services.Windows.IsLayoutEditing;
 
     public void Dispose()
     {
@@ -150,7 +164,10 @@ public sealed partial class Plugin : IStellarPlugin
         // _tiles samples, so the bar stays smooth; only the data refresh throttles.
         // Placed mode: the same 10 Hz read while any placed tile COULD show (in world, no menu, or the layout editor) —
         // the placed windows are hidden until their effect is active, so their own IsShown can't gate it.
-        bool barLive = _bar != null && _bar.IsShown && !_perfOff;
+        // "Hide when empty" hides the bar through ShouldRender, so IsShown goes false while nothing is active: keep reading
+        // then too (only when nothing ELSE hides it — not in world, a menu, Placed mode), or it would never come back.
+        bool barShown = _bar != null && _bar.IsShown && !_perfOff;
+        bool barLive = barShown || (_bar != null && !_perfOff && _hideEmpty && BarGateOpen());
         bool placedLive = PlacedLive();   // Plugin.Placed.cs — false in Bar mode
         if (!placedLive && _placedLive) ClearPlacedTiles();   // gate closed: no stale tile may show on the next open
         _placedLive = placedLive;
@@ -169,7 +186,7 @@ public sealed partial class Plugin : IStellarPlugin
                 RebuildSnapshot();             // Plugin.Seen.cs
                 CdPerf.End(CdPerf.Refresh, perfRefresh);
             }
-            if (barLive)
+            if (barShown)
             {
                 TickBarFrame();                // Plugin.Bar.Frame.cs — re-style a remounted root, live panel colour
                 TickBarMigration(deltaTime);   // one-time; a single compare once done

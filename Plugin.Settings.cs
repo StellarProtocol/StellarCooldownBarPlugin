@@ -109,13 +109,20 @@ public sealed partial class Plugin
     }
 
     // ── DISPLAY panel ─────────────────────────────────────────────────────────────────────────────────────────────
-    // [Show as: Bar / Placed] · Bar → Background, Placed → Size (there is no bar panel to colour) · Hidden effects. The
-    // middle row is two complete 28 px rows swapped by a Conditional, so switching never changes the panel's height.
+    // [Show as: Bar / Placed] · Bar → Background, Placed → Size (there is no bar panel to colour) · Hide when empty (Bar
+    // only) · Hidden effects. The Background/Size row is two complete 28 px rows swapped by a Conditional. "Hide when
+    // empty" collapses in Placed mode (placed tiles already hide while inactive); the window's fixed height gives the
+    // freed 34 px to the flexible list below.
     private HudElement BuildDisplaySection() => SectionPanel(() => _loc.T("cd.sec.display"), () => _loc.T("cd.sec.displayHint"),
         new HudElement[]
         {
             DisplayModeRow(),   // Plugin.Settings.Placed.cs
             new ConditionalElement(() => _placedMode, PlacedSizeRow(), BackgroundRow()),
+            new ConditionalElement(() => !_placedMode, SettingRow(
+                new CellElement(new TextElement(() => _loc.T("cd.hideEmpty"), Color: () => TextColor(), NoWrap: true)
+                    { Ellipsize = true }, Weight: 1f),
+                OnOffChip(() => _hideEmpty, SetHideEmpty),
+                HelpDot("cd.hideEmpty", "cd.help.hideEmpty", "cd.sec.display"))),
             SettingRow(
                 new CellElement(new TextElement(() => _loc.T("cd.showHidden"), Color: () => TextColor(), NoWrap: true)
                     { Ellipsize = true }, Weight: 1f),
@@ -175,6 +182,14 @@ public sealed partial class Plugin
     {
         if (_bgSaveAt < 0) return;
         _bgSaveAt = -1;
+        _cfg.Save();
+    }
+
+    // Bar mode: hide the bar while it has no active tile (Plugin.cs BarHiddenWhenEmpty). One click → one save.
+    private void SetHideEmpty(bool on)
+    {
+        _hideEmpty = on;
+        _cfg.Set("bar.hide_empty", on);
         _cfg.Save();
     }
 

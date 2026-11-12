@@ -70,8 +70,12 @@ public sealed partial class Plugin
         return rt;
     }
 
-    private float BarWidth  { get { var rt = BarRt(); return rt != null ? rt.rect.width  : _bar?.Rect.Width ?? 0f;  } }
-    private float BarHeight { get { var rt = BarRt(); return rt != null ? rt.rect.height : _bar?.Rect.Height ?? 0f; } }
+    // Only while the bar is drawn: hidden ("Hide when empty") there is no root to find, and the 1 s Find retry would walk
+    // the scene every second for nothing. The saved rect (unchanged while hidden) sizes the layout then.
+    private RectTransform? LiveBarRt() => _bar != null && _bar.IsShown ? BarRt() : null;
+
+    private float BarWidth  { get { var rt = LiveBarRt(); return rt != null ? rt.rect.width  : _bar?.Rect.Width ?? 0f;  } }
+    private float BarHeight { get { var rt = LiveBarRt(); return rt != null ? rt.rect.height : _bar?.Rect.Height ?? 0f; } }
 
     private void UpdateArrivalOrder(int n)
     {
