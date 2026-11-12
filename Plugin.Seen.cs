@@ -94,7 +94,7 @@ public sealed partial class Plugin
             if (skillExclude ? inList : !inList) continue;
             float rem = SkillCDPatch.GetRemainSec(entry);
             if (rem <= 0f) continue;
-            SampleCooldown(entry, rem, now, out float disp, out float rate);   // Plugin.Smooth.cs — measured rate, never-go-up
+            SampleCooldown(entry, rem, now, out float disp, out float rate);   // Plugin.Smooth.cs / CdSmooth.cs — measured rate, no jitter tick-up, resync
             bool isImagine = entry.MaxCharges > 1;
             _tiles[n++] = new TrackedTile(TileKind.Cooldown, baseId, isImagine, baseId,
                 disp, now, entry.TotalSec, rate, isImagine ? entry.PendingCharges : 0, false);
