@@ -46,7 +46,7 @@ public sealed partial class Plugin
         int n = TileChipCount(idx);
         if (n == _chipN[idx] && _chipStr[idx] != null) return _chipStr[idx];
         _chipN[idx] = n;
-        return _chipStr[idx] = n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return _chipStr[idx] = TileFooterFit.ChipText(n);   // 1–99 exact, "99+" from 100
     }
     // ── Fallback badge (icon-less tiles) ─────────────────────────────────────
     private readonly Dictionary<(TileKind, int), string> _abbrevCache = new();
