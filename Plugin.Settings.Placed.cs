@@ -216,6 +216,9 @@ public sealed partial class Plugin
 
     private string PlacedHint() => _placedHintFmt.Get(_loc.T("cd.hint.placed"), _placedCount, MaxPlaced);
 
+    // "Placed: 18 effects" — the number of placed TILES, not "on screen": a tile shows only while its effect is active.
     private string PlacedStatus()
-        => _stBaseLoaded && _buffTabLoaded ? _placedStatusFmt.Get(_loc.T("cd.settings.status.placed"), _placedCount) : PendingText;
+        => _stBaseLoaded && _buffTabLoaded
+            ? _placedStatusFmt.Get(_loc.T(_placedCount == 1 ? "cd.settings.status.placed.one" : "cd.settings.status.placed"), _placedCount)
+            : PendingText;
 }
