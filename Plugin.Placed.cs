@@ -14,8 +14,8 @@ namespace Stellar.CooldownBar;
 /// <item>Max <see cref="MaxPlaced"/>. Placement is STABLE: effects already placed stay placed (persisted order
 /// "placed.order"); newly ticked ones are appended in list order while there is room; the rest are "not placed".</item>
 /// <item>Window lifecycle: windows are registered when the placed set gains an effect and removed when it loses one or
-/// Placed mode is left — only from <see cref="SyncPlaced"/>, which runs on a SELECTION change (<see cref="_trackVer"/>),
-/// never per frame. The set needs the picker tables (groups), so Placed mode loads them at world entry
+/// Placed mode is left — decided only by <see cref="SyncPlaced"/>, which runs on a SELECTION change (<see cref="_trackVer"/>),
+/// never per frame; the registrations themselves are spread over ticks (<see cref="PumpPlacedWindows"/>). The set needs the picker tables (groups), so Placed mode loads them at world entry
 /// (Plugin.Normalize.cs NeedEagerTables).</item>
 /// <item>Data: no second game-reading path. RebuildSnapshot (Plugin.Seen.cs) keeps every placed effect's tile in
 /// <c>_tiles</c> and <see cref="AssignPlacedTiles"/> hands each window its index; the window Funcs read that.</item>
@@ -115,6 +115,7 @@ public sealed partial class Plugin
     {
         if (!_placedMode) return;
         if (_placedSyncVer != _trackVer && _stBaseLoaded && _buffTabLoaded) SyncPlaced();
+        PumpPlacedWindows();
         TickPlacedFade();   // Plugin.Placed.Fade.cs
     }
 
@@ -221,8 +222,32 @@ public sealed partial class Plugin
         _placed[slot] = p;
         _placedCount++;
         _tiles[MaxTiles + slot] = SampleTile(kind, id);
-        p.Win = RegisterPlacedWindow(p);    // Plugin.Placed.Window.cs
+        _placedPumpDue = true;              // the window is registered by PumpPlacedWindows, a few per tick
         return p;
+    }
+
+    // Registering a placed window mounts and builds it (and the framework then persists its first settled rect — a config
+    // write per window). All 18 in one frame was a 140 + 190 ms hitch when switching to Placed (in game 2026-11-13:
+    // build:firstApply 57.8 ms/18, then cfg-save 11.1 ms/18). So AddPlaced only records the effect and this registers
+    // PlacedRegisterPerTick windows per OnUpdate (~30 Hz → 18 windows in ~0.3 s), at a switch to Placed and at world
+    // entry alike. Everything else (placed keys, members, samples) is set at once, so the picker's feedback is unchanged.
+    // Idle cost: one bool test.
+    private const int PlacedRegisterPerTick = 2;
+    private bool _placedPumpDue;
+
+    private void PumpPlacedWindows()
+    {
+        if (!_placedPumpDue) return;
+        int done = 0;
+        for (int s = 0; s < MaxPlaced; s++)
+        {
+            var p = _placed[s];
+            if (p == null || p.Win != null) continue;
+            if (done == PlacedRegisterPerTick) return;   // more left: next tick
+            p.Win = RegisterPlacedWindow(p);    // Plugin.Placed.Window.cs
+            done++;
+        }
+        _placedPumpDue = false;
     }
 
     private void RemovePlaced(int slot)
@@ -245,6 +270,7 @@ public sealed partial class Plugin
         _placedKeys.Clear();
         _notPlacedKeys.Clear();
         _placedSyncVer = -1;
+        _placedPumpDue = false;
     }
 
     // A frozen sample for the layout editor: 12 s left of 20 (rate 0, so it never ticks), no chip. Icon source like the
