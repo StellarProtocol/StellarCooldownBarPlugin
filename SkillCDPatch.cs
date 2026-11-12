@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq.Expressions;
 using System.Reflection;
 using HarmonyLib;
 using Stellar.Abstractions.Services;
@@ -25,7 +26,7 @@ internal static class SkillCDPatch
     private static readonly Dictionary<int, SkillCdEntry> _activeCDs = new();
     private static Action<string>? _log;
 
-    // Demand gate — matches BuffTrackPatch. The OnCDBegin/OnSkillCDLayerChanged postfixes and the per-frame
+    // Demand gate — matches BuffTrackPatch. The OnCDBegin/OnSkillCDLayerChanged postfixes and the per-read
     // GetRemainSec query only matter while the bar is refreshing; skip the postfixes otherwise. The plugin's
     // OnUpdate calls MarkDemand() each throttled refresh while the bar is shown.
     private const  long DemandWindowMs = 500;
@@ -33,21 +34,27 @@ internal static class SkillCDPatch
     private static bool Active => _lastDemandTick != 0 && Environment.TickCount64 - _lastDemandTick < DemandWindowMs;
     internal static void MarkDemand() => _lastDemandTick = Environment.TickCount64;
 
-    // Reused arg array for the per-CD ZBattleUtils.TryGetCDData query (avoids a new object?[2] per active CD per refresh).
-    private static readonly object?[] _cdArgs = new object?[2];
+    private const BindingFlags PubInst = BindingFlags.Public | BindingFlags.Instance;
 
-    private static MethodInfo?   _miGetSkillId;
-    private static PropertyInfo? _piDuration;
-    private static PropertyInfo? _piCdKey;
-    private static PropertyInfo? _piSkillRow;
-    private static PropertyInfo? _piSkillName;
+    // All member reads are delegates bound once by Getters (compiled; reflection fallback) — no GetValue / Invoke /
+    // Convert boxing per call (Plugin-Performance-Rules.md §2).
+    // OnCDBegin: SkillControlData.SkillId / CdKey / SkillRow(.Name) + the CD arg's Duration.
+    private static Func<object, long>?    _getSkillId, _getDuration;
+    private static Func<object, object?>? _getCdKey, _getSkillRow, _getSkillName;
+    private static bool                   _beginResolved;
 
-    private static MethodInfo?   _miTryGetCDData;
-    private static PropertyInfo? _piProgress;
-    private static PropertyInfo? _piCdRealLen;
-    private static PropertyInfo? _piCdCurLayer;
-    private static PropertyInfo? _piCdMaxLayer;
-    private static bool          _liveQueryReady;
+    // OnSkillCDLayerChanged arg getters — bound per arg TYPE (it is CDData in practice, but this path never assumed so).
+    private static Type?                 _layerArgType;
+    private static Func<object, double>? _lProgress;
+    private static Func<object, long>?   _lCur, _lMax;
+
+    // ZBattleUtils.TryGetCDData(string, out CDData) compiled into key → CDData-or-null (the out param is a local of the
+    // compiled lambda, so no object[] / boxing). Fallback: Invoke with the reused _cdArgs array.
+    private static Func<string, object?>? _tryGetCd;
+    private static readonly object?[]     _cdArgs = new object?[2];
+    private static Func<object, double>?  _cdProgress;
+    private static Func<object, long>?    _cdCur, _cdMax;
+    private static bool                   _liveQueryReady;
 
     private static bool _loggedError;
 
@@ -97,32 +104,29 @@ internal static class SkillCDPatch
         // Harmony teardown is owned by IHarmonyHost, which auto-unpatches every instance on plugin dispose —
         // do NOT unpatch here (that would double-unpatch). Only reset our own transient reflection state.
         _activeCDs.Clear();
-        _miGetSkillId     = null;
-        _piDuration       = null;
-        _piCdKey          = null;
-        _piSkillRow       = null;
-        _piSkillName      = null;
-        _miTryGetCDData   = null;
-        _piProgress       = null;
-        _piCdRealLen      = null;
-        _liveQueryReady   = false;
-        _loggedError      = false;
-        _lastDemandTick   = 0;
+        _getSkillId = _getDuration = null;
+        _getCdKey = _getSkillRow = _getSkillName = null;
+        _beginResolved = false;
+        _layerArgType = null; _lProgress = null; _lCur = _lMax = null;
+        _tryGetCd = null; _cdArgs[0] = _cdArgs[1] = null;
+        _cdProgress = null; _cdCur = _cdMax = null;
+        _liveQueryReady = false;
+        _loggedError    = false;
+        _lastDemandTick = 0;
     }
 
     internal static float GetRemainSec(SkillCdEntry entry)
     {
         if (!_liveQueryReady) ResolveLiveQuery();
-        if (_miTryGetCDData == null || string.IsNullOrEmpty(entry.CdKey)) return -1f;
+        if (_tryGetCd == null || string.IsNullOrEmpty(entry.CdKey)) return -1f;
         try
         {
-            var args = _cdArgs; args[0] = entry.CdKey; args[1] = null;   // reused arg array
-            if (!(bool)_miTryGetCDData.Invoke(null, args)! || args[1] == null) return -1f;
+            var cd = _tryGetCd(entry.CdKey);
+            if (cd == null) return -1f;
 
-            var   cd      = args[1];
-            float prog    = Convert.ToSingle(_piProgress?.GetValue(cd)  ?? 0f);
-            int   cur     = Math.Max(0, Convert.ToInt32(_piCdCurLayer?.GetValue(cd)  ?? 0));
-            int   max     = Math.Max(1, Convert.ToInt32(_piCdMaxLayer?.GetValue(cd) ?? 1));
+            float prog    = _cdProgress != null ? (float)_cdProgress(cd) : 0f;
+            int   cur     = Math.Max(0, _cdCur != null ? (int)_cdCur(cd) : 0);
+            int   max     = Math.Max(1, _cdMax != null ? (int)_cdMax(cd) : 1);
             entry.PendingCharges = max - cur;
             entry.MaxCharges     = max;
             float remain  = entry.TotalSec * (1f + cur - max * prog);
@@ -142,24 +146,30 @@ internal static class SkillCDPatch
         CdPerf.HookFull();
         try
         {
-            _miGetSkillId ??= __instance.GetType().GetMethod("get_SkillId", BindingFlags.Public | BindingFlags.Instance);
-            _piDuration   ??= __0.GetType().GetProperty("Duration", BindingFlags.Public | BindingFlags.Instance);
-            _piCdKey      ??= __instance.GetType().GetProperty("CdKey",     BindingFlags.Public | BindingFlags.Instance);
-            _piSkillRow   ??= __instance.GetType().GetProperty("SkillRow",  BindingFlags.Public | BindingFlags.Instance);
+            if (!_beginResolved)
+            {
+                _beginResolved = true;
+                int b0 = Getters.Bound, f0 = Getters.Fallback;
+                var it = __instance.GetType();
+                _getSkillId  = Getters.Long(it.GetMethod("get_SkillId", PubInst));
+                _getCdKey    = Getters.Obj(it.GetProperty("CdKey",    PubInst));
+                _getSkillRow = Getters.Obj(it.GetProperty("SkillRow", PubInst));
+                _getDuration = Getters.Long(__0.GetType().GetProperty("Duration", PubInst));
+                LogBindPath("OnCDBegin", b0, f0);
+            }
+            if (_getSkillId == null || _getDuration == null) return;
 
-            if (_miGetSkillId == null || _piDuration == null) return;
-
-            int   skillId    = (int)_miGetSkillId.Invoke(__instance, null)!;
-            int   durationMs = (int)(_piDuration.GetValue(__0) ?? 0);
+            int   skillId    = (int)_getSkillId(__instance);
+            int   durationMs = (int)_getDuration(__0);
             if (durationMs <= 0) return;
 
-            string cdKey     = (string?)(_piCdKey?.GetValue(__instance)) ?? "";
+            string cdKey     = (string?)_getCdKey?.Invoke(__instance) ?? "";
             string skillName = "";
-            var skillRow     = _piSkillRow?.GetValue(__instance);
+            var skillRow     = _getSkillRow?.Invoke(__instance);
             if (skillRow != null)
             {
-                _piSkillName ??= skillRow.GetType().GetProperty("Name", BindingFlags.Public | BindingFlags.Instance);
-                skillName = (string?)(_piSkillName?.GetValue(skillRow)) ?? "";
+                _getSkillName ??= Getters.Obj(skillRow.GetType().GetProperty("Name", PubInst));
+                skillName = (string?)_getSkillName?.Invoke(skillRow) ?? "";
             }
 
             var entry      = new SkillCdEntry(skillId);
@@ -183,19 +193,24 @@ internal static class SkillCDPatch
         CdPerf.HookFull();
         try
         {
-            _miGetSkillId ??= __instance.GetType().GetMethod("get_SkillId", BindingFlags.Public | BindingFlags.Instance);
-            if (_miGetSkillId == null) return;
+            if (!_beginResolved && _getSkillId == null)
+                _getSkillId = Getters.Long(__instance.GetType().GetMethod("get_SkillId", PubInst));
+            if (_getSkillId == null) return;
 
             var cdType = __0.GetType();
-            _piProgress   ??= cdType.GetProperty("Progress",   BindingFlags.Public | BindingFlags.Instance);
-            _piCdCurLayer ??= cdType.GetProperty("CdCurLayer", BindingFlags.Public | BindingFlags.Instance);
-            _piCdMaxLayer ??= cdType.GetProperty("CdMaxLayer", BindingFlags.Public | BindingFlags.Instance);
-            if (_piProgress == null) return;
+            if (cdType != _layerArgType)
+            {
+                _layerArgType = cdType;
+                _lProgress = Getters.Double(cdType.GetProperty("Progress",   PubInst));
+                _lCur      = Getters.Long(cdType.GetProperty("CdCurLayer",   PubInst));
+                _lMax      = Getters.Long(cdType.GetProperty("CdMaxLayer",   PubInst));
+            }
+            if (_lProgress == null) return;
 
-            int   skillId  = (int)_miGetSkillId.Invoke(__instance, null)!;
-            float progress = Convert.ToSingle(_piProgress.GetValue(__0)!);
-            int   cur      = Math.Max(0, Convert.ToInt32(_piCdCurLayer?.GetValue(__0) ?? 0));
-            int   max      = Math.Max(1, Convert.ToInt32(_piCdMaxLayer?.GetValue(__0) ?? 1));
+            int   skillId  = (int)_getSkillId(__instance);
+            float progress = (float)_lProgress(__0);
+            int   cur      = Math.Max(0, _lCur != null ? (int)_lCur(__0) : 0);
+            int   max      = Math.Max(1, _lMax != null ? (int)_lMax(__0) : 1);
             if (progress >= 1f && (max == 1 || cur >= max))
                 _activeCDs.Remove(skillId);
         }
@@ -213,23 +228,56 @@ internal static class SkillCDPatch
         var t = StellarInterop.FindType("Panda.ZGame.ZBattleUtils");
         if (t == null) { _log?.Invoke("[SkillCD] ZBattleUtils not found"); return; }
 
+        MethodInfo? mi = null;
         foreach (var m in t.GetMethods(BindingFlags.Public | BindingFlags.Static))
         {
             if (m.Name != "TryGetCDData") continue;
             var ps = m.GetParameters();
-            if (ps.Length == 2 && ps[0].ParameterType == typeof(string)) { _miTryGetCDData = m; break; }
+            if (ps.Length == 2 && ps[0].ParameterType == typeof(string)) { mi = m; break; }
         }
+        if (mi == null) { _log?.Invoke("[SkillCD] TryGetCDData not found"); return; }
 
-        if (_miTryGetCDData == null) { _log?.Invoke("[SkillCD] TryGetCDData not found"); return; }
-
-        var cdDataType = _miTryGetCDData.GetParameters()[1].ParameterType.GetElementType();
+        var cdDataType = mi.GetParameters()[1].ParameterType.GetElementType();
+        int b0 = Getters.Bound, f0 = Getters.Fallback;
+        _tryGetCd = BindTryGetCd(mi, cdDataType);
         if (cdDataType != null)
         {
-            _piCdRealLen  = cdDataType.GetProperty("CdRealLen",  BindingFlags.Public | BindingFlags.Instance);
-            _piCdCurLayer = cdDataType.GetProperty("CdCurLayer", BindingFlags.Public | BindingFlags.Instance);
-            _piCdMaxLayer = cdDataType.GetProperty("CdMaxLayer", BindingFlags.Public | BindingFlags.Instance);
-            _piProgress ??= cdDataType.GetProperty("Progress", BindingFlags.Public | BindingFlags.Instance);
+            _cdProgress = Getters.Double(cdDataType.GetProperty("Progress",   PubInst));
+            _cdCur      = Getters.Long(cdDataType.GetProperty("CdCurLayer",   PubInst));
+            _cdMax      = Getters.Long(cdDataType.GetProperty("CdMaxLayer",   PubInst));
         }
-        _log?.Invoke($"[SkillCD] live query ready: TryGetCDData={_miTryGetCDData != null}");
+        _log?.Invoke($"[SkillCD] live query ready: TryGetCDData={_tryGetCd != null}");
+        LogBindPath("CDData/TryGetCDData", b0, f0);
     }
+
+    // key → CDData-or-null. The compiled form declares the out CDData as a block local, so a call allocates nothing
+    // beyond the returned proxy wrapper. If expression compile is unavailable, fall back to the reused-array Invoke.
+    private static Func<string, object?> BindTryGetCd(MethodInfo mi, Type? cdDataType)
+    {
+        if (cdDataType != null)
+        {
+            try
+            {
+                var key = Expression.Parameter(typeof(string), "key");
+                var cd  = Expression.Variable(cdDataType, "cd");
+                var body = Expression.Block(typeof(object), new[] { cd },
+                    Expression.Condition(Expression.Call(mi, key, cd),
+                        Expression.Convert(cd, typeof(object)),
+                        Expression.Constant(null, typeof(object))));
+                var f = Expression.Lambda<Func<string, object?>>(body, key).Compile();
+                Getters.Bound++;
+                return f;
+            }
+            catch (Exception ex) { _log?.Invoke($"[SkillCD] TryGetCDData bind failed, using Invoke: {ex.Message}"); }
+        }
+        Getters.Fallback++;
+        return k =>
+        {
+            var args = _cdArgs; args[0] = k; args[1] = null;   // reused arg array
+            return (bool)mi.Invoke(null, args)! ? args[1] : null;
+        };
+    }
+
+    private static void LogBindPath(string what, int bound0, int fallback0) =>
+        _log?.Invoke($"[SkillCD] {what} getters: {Getters.Bound - bound0} compiled, {Getters.Fallback - fallback0} reflection fallback");
 }

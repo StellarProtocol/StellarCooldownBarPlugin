@@ -9,12 +9,12 @@ internal static partial class BuffTrackPatch
     // ── Show-hidden: full (unfiltered) buff list source ──────────────────────────
     // When ShowHidden is on the bar reads the FULL server buff list (pBuffList_ / buffList_) instead of the game's
     // display-filtered "showed" list (pShowedBuffList_ / showedBuffList_), so icon-less / internal buffs appear.
-    // Both PropertyInfos resolve once (the showed one via ResolveShowedList in BuffTrackPatch.cs, the full one here);
+    // Both list getters resolve once and are bound to delegates (the showed one via ResolveShowedList in .Resolve.cs, the full one here);
     // RefreshActiveBuffs picks between them at read-time from this flag. Set from Plugin whenever config changes.
     internal static bool ShowHidden;
 
-    private static PropertyInfo? _piFullBuffList;
-    private static bool          _fullListResolved;
+    private static Func<object, object?>? _getFullBuffList;
+    private static bool                   _fullListResolved;
 
     // Prefer the FULL unfiltered lists (mirrors TargetLens' ResolveShowedList priority), showed lists only as fallback.
     private static void ResolveFullBuffList(object comp)
@@ -26,7 +26,7 @@ internal static partial class BuffTrackPatch
             int prio = p.Name switch { "pBuffList_" => 0, "buffList_" => 1, "pShowedBuffList_" => 2, "showedBuffList_" => 3, _ => 99 };
             if (prio < bestPrio) { best = p; bestPrio = prio; if (bestPrio == 0) break; }
         }
-        _piFullBuffList = best;
+        _getFullBuffList = Getters.Obj(best);
     }
 
     // The server buff list to iterate this refresh: full (unfiltered) when ShowHidden, else the display-filtered list.
@@ -35,16 +35,16 @@ internal static partial class BuffTrackPatch
         if (ShowHidden)
         {
             if (!_fullListResolved) ResolveFullBuffList(comp);
-            return _piFullBuffList?.GetValue(comp);
+            return _getFullBuffList?.Invoke(comp);
         }
         if (!_showedListResolved) ResolveShowedList();
-        return _piShowedBuffList?.GetValue(comp);
+        return _getShowedBuffList?.Invoke(comp);
     }
 
     // Reset the show-hidden list caches on Uninstall (called from BuffTrackPatch.cs Uninstall).
     private static void ResetShowHiddenCaches()
     {
-        _piFullBuffList = null; _fullListResolved = false;
+        _getFullBuffList = null; _fullListResolved = false;
     }
 
     // ── Server clock (true buff remaining = CreateTime + Duration − serverNow) ────
@@ -103,6 +103,20 @@ internal static partial class BuffTrackPatch
     private static PropertyInfo? _piSkillRowName;
     private static bool          _skillTableResolved;
 
+    // Table rows are only looked up on (re)init of a buff identity — rare — so these stay reflection; the arg array is
+    // shared (main thread only) instead of a new object[] per lookup.
+    private static readonly object[] _rowArgs = new object[1];
+
+    private static void ResetTableCaches()
+    {
+        _tableReflResolved = false;
+        _miGetBuffTable = _miGetBuffRow = null; _buffTableInst = null;
+        _piBuffRowName = _piBuffRowIcon = _piBuffRowVisible = _piBuffRowType = _piBuffRowSkillId = null;
+        _skillTableResolved = false;
+        _skillTableInst = null; _miGetSkillRow = null; _piSkillRowName = null;
+        _rowArgs[0] = null!;
+    }
+
     private static void GetBuffInfo(int baseId, out string name, out int? visible, out int? buffType, out int skillId, out bool hidden)
     {
         name = ""; visible = null; buffType = null; skillId = 0; hidden = false;
@@ -110,7 +124,8 @@ internal static partial class BuffTrackPatch
         if (_miGetBuffRow == null || _buffTableInst == null) return;   // table not ready → leave hidden=false so real buffs aren't hidden by a transient miss
         try
         {
-            var row = _miGetBuffRow.Invoke(_buffTableInst, new object[] { (object)baseId });
+            var args = _rowArgs; args[0] = baseId;                     // reused arg array (reinit-only path; low rate)
+            var row = _miGetBuffRow.Invoke(_buffTableInst, args);
             if (row == null) return;                                    // row not resolvable → hidden stays false (bias to NOT hiding)
             var t = row.GetType();
             _piBuffRowName    ??= t.GetProperty("Name",     BindingFlags.Public | BindingFlags.Instance);
@@ -163,7 +178,8 @@ internal static partial class BuffTrackPatch
         if (_miGetSkillRow == null || _skillTableInst == null) return "";
         try
         {
-            var row = _miGetSkillRow.Invoke(_skillTableInst, new object[] { (object)skillId });
+            var args = _rowArgs; args[0] = skillId;                    // reused arg array
+            var row = _miGetSkillRow.Invoke(_skillTableInst, args);
             if (row == null) return "";
             _piSkillRowName ??= row.GetType().GetProperty("Name", BindingFlags.Public | BindingFlags.Instance);
             return (string?)(_piSkillRowName?.GetValue(row)) ?? "";
