@@ -9,9 +9,9 @@ namespace Stellar.CooldownBar;
 // Settings window's first shown refresh (SelListCount) or the eager world-entry load below — never in the constructor.
 // It saves once, only when something changed, and logs one line.
 //
-// Eager load: the picker tables are otherwise built on the first Settings open. The conversion only needs them once per
-// install (config "track.normalized" records it), so a world-entry load happens just until that first successful run
-// (and, in Placed mode, every session: Plugin.Placed.cs needs the groups). It is the existing one-shot reflection walk —
+// Eager load: the picker tables are otherwise built on the first Settings open. The skill table loads at world entry
+// every session (the bar's cooldown → skill mapping uses it). The buff table only until the conversion has run once per
+// install (config "track.normalized" records it) — and, in Placed mode, every session: Plugin.Placed.cs needs the groups. It is the existing one-shot reflection walk —
 // a single main-thread hitch, retried every 2 s while the game tables aren't ready.
 public sealed partial class Plugin
 {
@@ -30,16 +30,19 @@ public sealed partial class Plugin
     private bool NeedEagerTables => !_normPersisted || _placedMode;
 
     // OnUpdate: a couple of bool tests in the common case. Loaded → only the (rate-limited) conversion, until it ran;
-    // not loaded → load only when someone needs the tables now.
+    // not loaded → load only what someone needs now. The SKILL table loads every session: the bar's live cooldown →
+    // skill mapping is the list's (Plugin.Seen.cs ResolveNamedBaseSkill), so a 392301 cooldown matches the 3923 tick
+    // from the first fight, not only after Settings was opened (one reflection walk per session, at world entry).
     private void TickEagerTables()
     {
         bool loaded = _stBaseLoaded && _buffTabLoaded;
-        if (loaded ? _normDone : !NeedEagerTables) return;
+        if (_stBaseLoaded && (loaded ? _normDone : !NeedEagerTables)) return;
         long now = Environment.TickCount64;
         if (now < _eagerTablesAt) return;
         _eagerTablesAt = now + EagerTableRetryMs;
         if (_services.ClientState.Phase != GamePhase.World) return;
-        if (!loaded) { EnsureSkillTabLoaded(); EnsureBuffTabLoaded(); }
+        EnsureSkillTabLoaded();
+        if (NeedEagerTables) EnsureBuffTabLoaded();
         TryNormalizeSelection();
     }
 
@@ -52,9 +55,7 @@ public sealed partial class Plugin
         _normDone = true;
 
         int converted = 0, dropped = 0;
-        var listed = new HashSet<int>();   // what the Skills list shows (base table + bar-seen); one-shot, so it may allocate
-        for (int i = 0; i < _stCount; i++) listed.Add(_stIds[i]);
-        var skills  = SelectionNormalizer.Skills(_selection.SkillIds, listed, ref converted, ref dropped);
+        var skills  = SelectionNormalizer.Skills(_selection.SkillIds, _stListSet, _stAllSet, ref converted, ref dropped);
         var debuffs = SelectionNormalizer.Groups(_selection.DebuffIds, _dtMembers, _dtCount, ref converted, ref dropped);
         var buffs   = SelectionNormalizer.Groups(_selection.BuffIds,   _btMembers, _btCount, ref converted, ref dropped);
 

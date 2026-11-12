@@ -19,6 +19,10 @@ public sealed partial class Plugin
     private string[] _stBaseNames = Array.Empty<string>();
     private string[] _stBaseDescs = Array.Empty<string>();
     private bool     _stBaseLoaded;
+    // Id sets for SelectionNormalizer.MapSkill (the bar's resolution + the stale-id conversion): what the list shows
+    // (the table filtered by "Hidden effects") and every SkillTable row (unfiltered). Replaced on each table load.
+    private HashSet<int> _stListSet = new();
+    private HashSet<int> _stAllSet  = new();
     // Base skill ids the bar has actually displayed. Folded into the Skills tab so every cooldown that can appear
     // on the bar is toggleable — including placeholder-named skills the game's SkillTable doesn't list (owner 2026-08-19).
     private readonly HashSet<int> _seenSkillIds = new();
@@ -83,6 +87,7 @@ public sealed partial class Plugin
         var have  = new HashSet<int>(_stBaseIds);
         foreach (var id in _seenSkillIds)
         {
+            if (!_stAllSet.Contains(id)) continue;             // only real SkillTable rows (never a sub-id like 392301)
             if (!have.Add(id)) continue;                       // already in the base table (or a dup) — skip
             var info = _services.GameData.Combat.GetSkill(id);
             var nm   = info?.Name;
@@ -129,6 +134,7 @@ public sealed partial class Plugin
             var ids = new List<int>(); var names = new List<string>();
             PropertyInfo? piKvp = null, piId = null, piName = null, piIcon = null, piDesc = null;
             var descs = new List<string>();
+            var all = new HashSet<int>();
 
             foreach (var item in SettingsReflectEnumerate(values))
             {
@@ -151,6 +157,7 @@ public sealed partial class Plugin
                 }
                 int id   = (int)(piId?.GetValue(row) ?? 0);
                 if (id <= 0) continue;
+                all.Add(id);   // every row, before the Hidden-effects filter (SelectionNormalizer.MapSkill)
                 string name = (string?)(piName?.GetValue(row)) ?? "";
                 string icon = (string?)(piIcon?.GetValue(row)) ?? "";
                 // Show-hidden: keep every id>0 row. An unnamed hidden skill still needs a usable list label.
@@ -163,7 +170,10 @@ public sealed partial class Plugin
                 ids.Add(id); names.Add(name); descs.Add(desc);
             }
             _stBaseIds = ids.ToArray(); _stBaseNames = names.ToArray(); _stBaseDescs = descs.ToArray();
-            _services.Log.Info($"[Settings] loaded {_stBaseIds.Length} skills");
+            _stListSet = new HashSet<int>(ids);
+            _stAllSet  = all;
+            _baseSkillMemo.Clear();   // memoised mappings were made against the previous list (Hidden effects toggled)
+            _services.Log.Info($"[Settings] loaded {_stBaseIds.Length} skills ({all.Count} rows)");
         }
         catch (Exception ex)
         {

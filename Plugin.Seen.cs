@@ -110,7 +110,10 @@ public sealed partial class Plugin
             if (n >= MaxTiles) break;
             int baseId = ResolveNamedBaseSkill(entry.SkillId);
             if (baseId == 0) continue;
-            if (_seenSkillIds.Add(baseId)) _seenDirty = true;   // fold into the Skills filter list (before the exclude gate, so excluded skills stay toggleable)
+            // Fold into the Skills list (before the exclude gate, so excluded skills stay toggleable) — only real SkillTable
+            // rows the list doesn't show yet (hidden skills that fired), never a fallback guess or a sub-id like 392301.
+            if (_stBaseLoaded && !_stListSet.Contains(baseId) && _stAllSet.Contains(baseId) && _seenSkillIds.Add(baseId))
+                _seenDirty = true;
             bool inList = placed ? IsPlacedMember(TileKind.Cooldown, baseId) : _selection.IsCooldownTracked(baseId);
             if (skillExclude ? inList : !inList) continue;
             float rem = SkillCDPatch.GetRemainSec(entry);
@@ -206,17 +209,26 @@ public sealed partial class Plugin
     // A buff/debuff tile's sample: -1 = permanent (Duration 0), else SnapRemain (remaining at SnapTick).
     private static float BuffSample(BuffTrackEntry e) => e.Duration == 0 ? -1f : (e.SnapRemain < 0f ? 0f : e.SnapRemain);
 
-    // Memoize success only — table may finish loading after first CD arrives.
+    // Live cooldown id → the skill id its tile (and its tick) uses: the SAME mapping as the stale-id conversion
+    // (SelectionNormalizer.MapSkill — the id the Skills list shows, else id/100, else a hidden SkillTable row, else 0), so a
+    // Furious Hammer cooldown reported as 392301 matches the tick on 3923. The game's own name lookup is NOT the test: it
+    // answers with a name for sub-ids like 392301 (that kept it as its own skill, in game 2026-11-13).
+    // Until the table is loaded (world entry; Plugin.Normalize.cs loads it eagerly) the old named-row guess stands in, and
+    // is never memoised; list results are memoised until the next table load (which clears the memo).
     private readonly Dictionary<int, int> _baseSkillMemo = new();
     private int ResolveNamedBaseSkill(int cdId)
     {
         if (_baseSkillMemo.TryGetValue(cdId, out var cached)) return cached;
+        if (_stBaseLoaded)
+        {
+            int m = SelectionNormalizer.MapSkill(cdId, _stListSet, _stAllSet);
+            _baseSkillMemo[cdId] = m;
+            return m;
+        }
         var combat = _services.GameData.Combat;
-        int resolved = 0;
-        if (combat.GetSkill(cdId) is { Name.Length: > 0 }) resolved = cdId;
-        else { int b = cdId / 100; if (b > 0 && combat.GetSkill(b) is { Name.Length: > 0 }) resolved = b; }
-        if (resolved != 0) _baseSkillMemo[cdId] = resolved;
-        return resolved;
+        if (combat.GetSkill(cdId) is { Name.Length: > 0 }) return cdId;
+        int b = cdId / 100;
+        return b > 0 && combat.GetSkill(b) is { Name.Length: > 0 } ? b : 0;
     }
 
     private sealed class TileComparer : IComparer<TrackedTile>

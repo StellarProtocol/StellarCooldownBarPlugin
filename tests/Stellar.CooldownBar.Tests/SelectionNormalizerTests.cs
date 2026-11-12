@@ -10,12 +10,25 @@ public class SelectionNormalizerTests
 {
     // The Skills list shows 3923 ("Arcane! Furious Hammer") and 2233. 392301 is a sub-id of 3923 that the list never shows.
     private static readonly HashSet<int> List = new() { 3923, 2233 };
+    // Every SkillTable row: the listed ones + 7001, a hidden skill (no name/icon → not listed while Hidden effects is off).
+    private static readonly HashSet<int> All  = new() { 3923, 2233, 7001 };
+
+    // The bar's live cooldown → skill mapping is the same function: a Furious Hammer CD reported as 392301 lands on 3923.
+    [Fact]
+    public void MapSkill_LiveCdSubId_MapsToListedBase()
+    {
+        Assert.Equal(3923, SelectionNormalizer.MapSkill(392301, List, All));
+        Assert.Equal(3923, SelectionNormalizer.MapSkill(3923, List, All));
+        Assert.Equal(7001, SelectionNormalizer.MapSkill(7001, List, All));     // hidden row: itself
+        Assert.Equal(7001, SelectionNormalizer.MapSkill(700105, List, All));   // sub-id of a hidden row
+        Assert.Equal(0, SelectionNormalizer.MapSkill(123456, List, All));      // exists nowhere
+    }
 
     [Fact]
     public void Skills_UserConfig_392301_And_2233()
     {
         int conv = 0, drop = 0;
-        var r = SelectionNormalizer.Skills(new[] { 392301, 2233 }, List, ref conv, ref drop);
+        var r = SelectionNormalizer.Skills(new[] { 392301, 2233 }, List, All, ref conv, ref drop);
         Assert.Equal(new HashSet<int> { 3923, 2233 }, r);
         Assert.Equal((1, 0), (conv, drop));
     }
@@ -25,7 +38,7 @@ public class SelectionNormalizerTests
     {
         int conv = 0, drop = 0;
         // 555: not listed, and 5 isn't either → dropped. 999999: 9999 not listed → dropped.
-        var r = SelectionNormalizer.Skills(new[] { 392301, 2233, 3923, 555, 999999 }, List, ref conv, ref drop);
+        var r = SelectionNormalizer.Skills(new[] { 392301, 2233, 3923, 555, 999999 }, List, All, ref conv, ref drop);
         Assert.Equal(new HashSet<int> { 3923, 2233 }, r);   // 392301 → 3923 (dedup with the saved 3923)
         Assert.Equal(1, conv);
         Assert.Equal(2, drop);
@@ -35,7 +48,7 @@ public class SelectionNormalizerTests
     public void Skills_AlreadyNormal_IsUnchanged()
     {
         int conv = 0, drop = 0;
-        var r = SelectionNormalizer.Skills(new[] { 3923, 2233 }, List, ref conv, ref drop);
+        var r = SelectionNormalizer.Skills(new[] { 3923, 2233 }, List, All, ref conv, ref drop);
         Assert.Equal(new HashSet<int> { 3923, 2233 }, r);
         Assert.Equal((0, 0), (conv, drop));
     }

@@ -20,16 +20,33 @@ namespace Stellar.CooldownBar;
 /// </summary>
 internal static class SelectionNormalizer
 {
-    // `listIds` = every id the Skills list shows (Plugin.Settings.Tables.cs _stIds: the SkillTable rows + bar-seen skills).
-    public static HashSet<int> Skills(IEnumerable<int> saved, ISet<int> listIds, ref int converted, ref int dropped)
+    /// <summary>
+    /// The ONE skill-id mapping, shared by this conversion and the bar's live cooldown → skill resolution
+    /// (Plugin.Seen.cs), so a live cooldown reported as 392301 lands on the 3923 tick. In order: the id the list shows;
+    /// its id/100 the list shows; else the same two against EVERY SkillTable row (hidden ones included — a hidden skill
+    /// is still a real skill, shown once "Hidden effects" is on or once it fired); else 0 (exists nowhere).
+    /// </summary>
+    /// <param name="listed">The rows the Skills list shows right now (the table filtered by "Hidden effects").</param>
+    /// <param name="all">Every SkillTable row id, unfiltered.</param>
+    public static int MapSkill(int id, ISet<int> listed, ISet<int> all)
+    {
+        int b = id / 100;
+        if (listed.Contains(id)) return id;
+        if (b > 0 && listed.Contains(b)) return b;
+        if (all.Contains(id)) return id;
+        if (b > 0 && all.Contains(b)) return b;
+        return 0;
+    }
+
+    public static HashSet<int> Skills(IEnumerable<int> saved, ISet<int> listed, ISet<int> all, ref int converted, ref int dropped)
     {
         var result = new HashSet<int>();
         foreach (int id in saved)
         {
-            if (listIds.Contains(id)) { result.Add(id); continue; }
-            int b = id / 100;
-            if (b > 0 && listIds.Contains(b)) { result.Add(b); converted++; }
-            else dropped++;
+            int m = MapSkill(id, listed, all);
+            if (m == 0) { dropped++; continue; }
+            if (m != id) converted++;
+            result.Add(m);
         }
         return result;
     }
