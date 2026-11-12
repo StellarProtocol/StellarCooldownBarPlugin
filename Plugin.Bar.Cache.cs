@@ -15,7 +15,7 @@ namespace Stellar.CooldownBar;
 //    loading), so a miss is retried — every 200 ms for the first 2 s, then about once per second. A hit on a lower
 //    tier of the fallback chain (e.g. the plain skill icon while the Imagine art is still loading) is kept but the
 //    better tiers are re-tried on the same schedule, so the icon still upgrades the way the uncached chain did.
-//  • "+N" overflow: one string per N.
+//  • "+N" overflow: one string per N (capped at "+99", the fixed chip's widest label).
 // ClearBarCaches() runs on Show-hidden changes and Dispose.
 public sealed partial class Plugin
 {
@@ -137,7 +137,7 @@ public sealed partial class Plugin
 
     private string OverflowLabel()
     {
-        int n = _totalTileCount - _tileCount;
+        int n = Math.Min(_totalTileCount - _tileCount, 99);   // "+99" is the widest label the fixed chip is sized for
         if (n != _overflowN) { _overflowN = n; _overflowStr = "+" + n; }
         return _overflowStr;
     }

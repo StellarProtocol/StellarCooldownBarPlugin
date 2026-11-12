@@ -104,14 +104,25 @@ public sealed partial class Plugin
     }
 
     // Round "+N" chip: 24 px tall, MenuText @14 % fill, bold Text with the readability shadow (legacy 14 px, see above).
+    // FIXED width (house R10: a changing label never resizes anything): the label sits in a box that fits the longest
+    // case, "+99" (OverflowLabel caps there) = 23.7 px in the legacy 14 px bold face (Arial Bold: 1.696 em), so "+5" and
+    // "+12" draw in the same 38 × 24 capsule. Align Center on a fixed-width box centres the label: the legacy path sets
+    // alignByGeometry, which centres the drawn glyphs (CenterGlyphs is the TMP twin of that and is ignored on Shadow text).
+    // The old natural-width chip sat directly in a Conditional with MaxWidth 0, so it latched its first width and "+12"
+    // spilled off-centre (WindowBuilder-Patterns.md: give every fixed-width chip an explicit MaxWidth).
+    private const float OverflowLabelW = 24f;
+    private const float OverflowPadX   = 7f;
+
     private HudElement OverflowChip() => new BubbleElement(new RowElement(new HudElement[]
         {
             new SpacerElement(0f, OverflowChipH),
-            new TextElement(P(OverflowLabel), P<ColorRgba?>(() => TextColor()), NoWrap: true, FontSize: 12, Shadow: true) { Bold = true },
+            new TextElement(P(OverflowLabel), P<ColorRgba?>(() => TextColor()), Width: OverflowLabelW, Align: TextAlign.Center,
+                NoWrap: true, FontSize: 12, Shadow: true) { Bold = true, CenterGlyphs = true },
         }, Gap: 0.01f, Justify: RowJustify.Center))
     {
         FillColorFn = P<ColorRgba?>(() => TextColor() with { A = 0.14f }),
-        CornerRadius = RoundRadius(OverflowChipH), PaddingX = 9f, PaddingY = 0f,
+        CornerRadius = RoundRadius(OverflowChipH), PaddingX = OverflowPadX, PaddingY = 0f,
+        MaxWidth = OverflowLabelW + 2f * OverflowPadX,
     };
 
     private ColorRgba KindColor(int idx)
