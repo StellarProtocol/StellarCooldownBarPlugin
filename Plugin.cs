@@ -31,7 +31,8 @@ public sealed partial class Plugin : IStellarPlugin
     private int _tileCount;
     private const int MaxTiles = 64;
 
-    // Bar background: black at this opacity (0 = fully transparent, 1 = fully black). Persisted in config.
+    // Bar panel opacity (the Background slider): the rounded theme panel behind the tiles at this alpha (0 = fully
+    // see-through, 1 = solid). Persisted in config (same key as the old black box's opacity). Plugin.Bar.Frame.cs.
     private float _bgOpacity;
 
     // "Show hidden effects": when on, the picker lists ALL buff/skill rows (no Name/Icon filter) and the bar reads
@@ -57,13 +58,16 @@ public sealed partial class Plugin : IStellarPlugin
         BuffTrackPatch.Install(_services.Harmony.Create("buff"), _services.Log.Info,
             () => _services.CombatSnapshot.ServerNowMs);   // framework server clock (Server-Clock-and-Ping-HUD.md)
 
-        // Borderless window (chrome-less, HUD-like) via WindowBuilder — the icon-capable render path
-        // (the HUD builder has no GameTextureElement support). Mirrors CombatMeter's overlay.
+        InitBarMigration();   // Plugin.Bar.Frame.cs — one-time saved-height → row-count mapping for the taller tile
+        // Borderless window (chrome-less, HUD-like) via WindowBuilder — the icon-capable render path. Its rounded theme
+        // panel is the root Image, restyled by Plugin.Bar.Frame.cs (no WindowSpec.BackgroundOpacity: that painted it
+        // black). Height limits = exactly 1 and 3 tile rows (BarHeightFor, Plugin.Seen.cs); MinWidth 150 still fits two
+        // 50 px tiles (2·50 + 6 + 2·12 = 130).
         _bar = _services.Windows.Register(new WindowRegistration(
             new WindowSpec(
                 Id:          "cooldownbar.main",
                 Title:       _loc.T("cd.window.title"),
-                DefaultRect: new WindowRect(897f, 940f, 320f, 130f),
+                DefaultRect: new WindowRect(897f, 940f, 320f, BarHeightFor(1)),
                 Category:    WindowCategory.HUD,
                 Style:       WindowPanelStyle.Borderless)
             { StartVisible = true, Draggable = true,
@@ -73,10 +77,11 @@ public sealed partial class Plugin : IStellarPlugin
               ShouldRender = () => _services.ClientState.Phase == GamePhase.World
                                    && (_services.ClientState.UiState & (GameUIState.Blocking | GameUIState.AnyMenu)) == 0
                                    && !_perfOff,   // [CdPerf] in-session off control (always false unless probe on)
-              Resizable = true, MinWidth = 150f, MaxWidth = 1600f, MinHeight = 130f, MaxHeight = 270f,
-              BackgroundOpacity = () => _bgOpacity },
+              Resizable = true, MinWidth = 150f, MaxWidth = 1600f,
+              MinHeight = BarHeightFor(1), MaxHeight = BarHeightFor(MaxRows) },
             BuildRoot()));
 
+        _helpWindow = RegisterHelpWindow();   // before Settings: its "?" buttons read _helpWindow on every refresh
         _settings = BuildAndRegisterSettings();
         _tooltip  = BuildAndRegisterTooltip();
 
@@ -85,7 +90,7 @@ public sealed partial class Plugin : IStellarPlugin
                 Id:               "cooldownbar.settings",
                 Description:      _loc.T("cd.hotkey.toggle"),
                 SuggestedDefault: new KeyBinding(StellarKeyCode.F8)),
-            callback: () => _settings.SetVisible(!_settings.IsShown));
+            callback: ToggleSettings);
 
         // Launcher tile: the HUD bar is always-on in world, so the meaningful click action is opening the
         // settings picker (the same thing F8 toggles). Title stays the fixed literal "CooldownBar" — the
@@ -113,8 +118,10 @@ public sealed partial class Plugin : IStellarPlugin
         BuffTrackPatch.Uninstall();
         _toggleAction.Dispose();
         _tooltip.Remove();
+        _helpWindow.Remove();
         _settings.Remove();
         _bar.Remove();
+        DisposeBarFrame();  // Plugin.Bar.Frame.cs — the baked panel sprite
         ClearBarCaches();   // Plugin.Bar.Cache.cs
     }
 
@@ -146,10 +153,13 @@ public sealed partial class Plugin : IStellarPlugin
                 RebuildSnapshot();             // Plugin.Seen.cs
                 CdPerf.End(CdPerf.Refresh, perfRefresh);
             }
+            TickBarFrame();                    // Plugin.Bar.Frame.cs — re-style a remounted root, live panel colour
+            TickBarMigration(deltaTime);       // one-time; a single compare once done
         }
         if (TranslatedBuffText.ConsumeLoaded(out var loadMsg)) OnTranslatedTextLoaded(loadMsg);   // one int read/frame
         BgSaveTick();             // Plugin.Settings.cs — debounced config write after an opacity-slider drag
         TickTooltipPlace();       // Plugin.Tooltip.cs — re-assert cursor rect after destroy-on-hide remount
+        TickSettingsUi();         // Plugin.Settings.cs — help re-anchor + Untick-all confirm timeout
         LogSnapshotDiag(deltaTime);   // Plugin.Diagnostics.cs — gated on STELLAR_DIAGNOSTICS
         if (CdPerf.On) PerfTick(deltaTime, perfUpdate);   // Plugin.Perf.cs
     }

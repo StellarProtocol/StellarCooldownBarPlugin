@@ -6,13 +6,28 @@ namespace Stellar.CooldownBar;
 
 public sealed partial class Plugin
 {
-    private const float TileW      = 44f;   // CdTileIcon in WindowBuilder.CooldownTile.cs
-    private const float TileHGap   = 6f;   // horizontal gap between tiles
-    private const float TileRowH   = 62f;  // icon(44) + vlg.spacing(2) + secs text(~16)
-    private const float TileVGap   = 6f;   // vertical gap between tile rows
-    private const float ChromePadH = 24f;  // 2 × 12px borderless left+right chrome padding
-    private const float BaseH      = 130f; // single-row baseline window height
-    private const int   MaxRows    = 3;    // rows in the UI
+    // ── Bar geometry (redesign T1 tile, 2026-11-13) ──────────────────────────────────────────────────────────────
+    // Every size below is PINNED by the element tree (Plugin.Bar.Tile.cs / Plugin.Bar.cs), not estimated from fonts:
+    //   tile  = card padding 3 + [icon 40 | gap 2 | bar 4 | gap 2 | footer 16] + padding 3 = 70 tall;
+    //           3 + 44 (the footer cell's fixed width) + 3 = 50 wide. The icon is a fixed 40×40 GameTexture (or a 40 px
+    //           strut box), the bar track a 4 px BarElement, the footer a Text with Height 16 (chip 14 inside it).
+    //   caption row = the 28 px gear button (texts are shorter and centre on it);
+    //   window = Borderless chrome padding 12 on every side (WindowBuilder.Chrome.cs BuildBorderless).
+    // Pitch: 56 px across (50 + gap 6), 76 px down (70 + gap 6). Window height for r rows:
+    //   H(r) = 12 + 28 + 6 + r·70 + (r−1)·6 + 12 = 52 + 76·r  →  1 row 128 · 2 rows 204 · 3 rows 280.
+    // Validate in game with the bridge (ui.inspect "CdTile*" Bubble rects) — these are the layout contracts, not a
+    // screenshot measurement.
+    private const float TileW      = 50f;   // card outer width
+    private const float TileH      = 70f;   // card outer height
+    private const float TileHGap   = 6f;    // horizontal gap between tiles (tile row Gap)
+    private const float TileVGap   = 6f;    // vertical gap between tile rows (and caption → first row)
+    private const float CaptionH   = 28f;   // caption row = the round gear button
+    private const float ChromePad  = 12f;   // Borderless padding, each side
+    private const int   MaxRows    = 3;     // rows in the UI
+
+    // Window height that fits exactly `rows` tile rows under the caption (the HUD window's min = 1 row, max = 3).
+    private static float BarHeightFor(int rows)
+        => ChromePad * 2f + CaptionH + TileVGap + rows * TileH + (rows - 1) * TileVGap;
 
     // Arrival-order tracking: maps (kind, id) → monotonic sequence number assigned on first appearance.
     // Pruned each tick so a re-activated tile gets a fresh (later) number instead of keeping its old position.
@@ -109,7 +124,11 @@ public sealed partial class Plugin
             if (entry.Duration > 0 && entry.RemainSec < 0.05f) continue;
 
             var cls = ClassifyDebuff(entry);
-            if (cls.IsImagine && !debuffExclude) _selection.AutoTrackImagine(entry.BuffBaseId);
+            if (cls.IsImagine && !debuffExclude && _selection.ShouldAutoTrackImagine(entry.BuffBaseId))
+            {
+                _selection.AutoTrackImagine(entry.BuffBaseId);
+                _selVersion++;   // the picker's ticked counts / row ticks recompute (Plugin.Settings.Rows.cs)
+            }
             bool dbInList = _selection.IsDebuffTracked(entry.BuffBaseId);
             if (debuffExclude ? dbInList : !dbInList) continue;
 
@@ -141,7 +160,10 @@ public sealed partial class Plugin
         _tilesPerRow    = ComputeTilesPerRow();
         _rowsVisible    = ComputeRowsVisible();
         _totalTileCount = n;
-        _tileCount      = Math.Min(n, _tilesPerRow * _rowsVisible);
+        // Overflow: the last visible slot gives way to the round "+N" chip, so the chip always sits inside the panel
+        // (a full last row + the chip would run past the right edge).
+        int cap = _tilesPerRow * _rowsVisible;
+        _tileCount = n <= cap ? n : Math.Max(0, cap - 1);
     }
 
     // Classify a debuff entry as an imagine lockout (live source skill, BuffTable.SkillId, then the curated lockout
@@ -149,18 +171,22 @@ public sealed partial class Plugin
     private DebuffAttribution.Result ClassifyDebuff(BuffTrackEntry entry) =>
         _attr.Classify(entry.BuffBaseId, entry.SkillId);
 
+    // Tiles that FULLY fit across: n·50 + (n−1)·6 ≤ width − 24 (0.5 px slack for float rects). Never clips a tile.
     private int ComputeTilesPerRow()
     {
-        float inner = BarWidth - ChromePadH;
+        float inner = BarWidth - ChromePad * 2f;
         if (inner <= 0f) return MaxTiles / MaxRows;
-        return Math.Min(MaxTiles / MaxRows, Math.Max(1, (int)((inner + TileHGap) / (TileW + TileHGap))));
+        return Math.Min(MaxTiles / MaxRows, Math.Max(1, (int)((inner + TileHGap + 0.5f) / (TileW + TileHGap))));
     }
 
+    // Rows that FULLY fit down: BarHeightFor(r) ≤ height — a row appears only once the window is tall enough for all
+    // of it (the window's min/max are exactly 1 and 3 rows, so this is 1..3).
     private int ComputeRowsVisible()
     {
         float h = BarHeight;
         if (h <= 0f) return 1;
-        return Math.Min(MaxRows, Math.Max(1, (int)((h - BaseH) / (TileRowH + TileVGap)) + 1));
+        float avail = h - (ChromePad * 2f + CaptionH + TileVGap) + TileVGap + 0.5f;
+        return Math.Min(MaxRows, Math.Max(1, (int)(avail / (TileH + TileVGap))));
     }
 
     // A buff/debuff tile's sample: -1 = permanent (Duration 0), else SnapRemain (remaining at SnapTick).

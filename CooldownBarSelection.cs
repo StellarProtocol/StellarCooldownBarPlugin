@@ -65,6 +65,20 @@ internal sealed class CooldownBarSelection
         else    { _debuffs.Remove(baseId); _imagineOptOut.Add(baseId); }
     }
 
+    /// <summary>Number of tracked (ticked) ids per kind — raw ids, not name groups.</summary>
+    public int SkillCount  => _skills.Count;
+    public int DebuffCount => _debuffs.Count;
+    public int BuffCount   => _buffs.Count;
+
+    /// <summary>"Untick all" for one kind. Debuffs go through <see cref="SetDebuff"/> so every cleared id is also
+    /// recorded as an imagine opt-out — exactly like unticking each row by hand (auto-track never re-ticks them).</summary>
+    public void ClearSkills() => _skills.Clear();
+    public void ClearBuffs()  => _buffs.Clear();
+    public void ClearDebuffs()
+    {
+        foreach (var id in _debuffs.ToArray()) SetDebuff(id, false);
+    }
+
     /// <summary>True when an imagine-lockout debuff should be auto-tracked (not already tracked, not opted out).</summary>
     public bool ShouldAutoTrackImagine(int baseId) =>
         !_debuffs.Contains(baseId) && !_imagineOptOut.Contains(baseId);

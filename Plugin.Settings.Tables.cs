@@ -245,6 +245,7 @@ public sealed partial class Plugin
     private void ApplySkillTabFilter(string text)
     {
         _stFilter = text; _stOffset = 0;
+        _selVersion++; _selScrollReset = true;   // re-sorted rows: slot caches + counts recompute, list back to the top
         SettingsFilterTable(text, _stIds, _stNames, _stDescs, _stCount,
             _selection.IsCooldownTracked, out _stFiltIds, out _stFiltNames, out _stFiltDescs, out _stFiltCount);
     }
@@ -252,6 +253,7 @@ public sealed partial class Plugin
     private void ApplyDebuffTabFilter(string text)
     {
         _dtFilter = text; _dtOffset = 0;
+        _selVersion++; _selScrollReset = true;   // re-sorted rows: slot caches + counts recompute, list back to the top
         SettingsFilterGroups(text, _dtIds, _dtNames, _dtDescs, _dtMembers, _dtCount, _selection.IsDebuffTracked,
             out _dtFiltIds, out _dtFiltNames, out _dtFiltDescs, out _dtFiltMembers, out _dtFiltCount);
     }
@@ -259,6 +261,7 @@ public sealed partial class Plugin
     private void ApplyBuffTabFilter(string text)
     {
         _btFilter = text; _btOffset = 0;
+        _selVersion++; _selScrollReset = true;   // re-sorted rows: slot caches + counts recompute, list back to the top
         SettingsFilterGroups(text, _btIds, _btNames, _btDescs, _btMembers, _btCount, _selection.IsBuffTracked,
             out _btFiltIds, out _btFiltNames, out _btFiltDescs, out _btFiltMembers, out _btFiltCount);
     }

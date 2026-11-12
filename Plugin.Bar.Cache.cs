@@ -7,7 +7,8 @@ namespace Stellar.CooldownBar;
 // Per-frame tile text + icon caches for the bar Funcs (Plugin-Performance-Rules.md §2/§5). The Funcs are polled every
 // frame for every visible tile, so none of them may format strings, run the tag-strip regex, or hit GameAssets per call:
 //  • Seconds: one cached string per tile SLOT, rebuilt only when the integer that drives the format changes
-//    (tenths < 10 s, whole seconds < 1000 s, minutes above; permanent / '*' fallback folded into the key).
+//    (CdTimeFormat.Key: tenths < 10 s, seconds < 100 s, minutes < 100 min, hours above; permanent / '*' folded in).
+//  • Charge / stack chip: one string per slot, rebuilt when the count changes.
 //  • Fallback badge (Abbrev(TileName)): cached per (kind, id) — it never changes for an id. Only cached once the game
 //    record exists (tables can load late), and cleared when the translated buff text arrives (TranslatedBuffText).
 //  • Icon: resolved texture + UV per (kind, id, icon skill), SUCCESSFUL loads only. Loads are async (null while
@@ -22,34 +23,31 @@ public sealed partial class Plugin
     private readonly long[]   _secKey = new long[MaxTiles];
     private readonly string[] _secStr = new string[MaxTiles];
 
+    // CdTimeFormat.cs owns the format (unit-tested) and the integer key that drives it.
     private string SecondsLabel(int idx)
     {
         if (idx >= _tileCount) return "";
         var t = _tiles[idx];
-        long key;
-        float secs = 0f;
-        if (t.Permanent) key = 1;   // "∞" — no expiry
-        else
-        {
-            // Truncate to whole ms like the old (int)(rem * 1000) snapshot so the formatted value is unchanged.
-            secs = (int)(t.RemainAt(Environment.TickCount64) * 1000f) / 1000f;
-            key = secs > 999f ? 4_000_000L + (int)(secs / 60f)
-                : secs >= 10f  ? 3_000_000L + (int)secs
-                :                2_000_000L + (long)MathF.Round(secs * 10f);   // F1 rounds to the nearest tenth
-        }
-        key = key * 2 + (t.Fallback ? 1 : 0);
+        // Truncate to whole ms like the old (int)(rem * 1000) snapshot so the formatted value is unchanged.
+        float secs = t.Permanent ? 0f : (int)(t.RemainAt(Environment.TickCount64) * 1000f) / 1000f;
+        long key = CdTimeFormat.Key(secs, t.Permanent, t.Fallback);
         if (key == _secKey[idx] && _secStr[idx] != null) return _secStr[idx];
-
-        string time = t.Permanent ? "∞"
-                    : secs > 999f ? (int)(secs / 60f) + "m"
-                    : secs >= 10f  ? (int)secs + "s"
-                    :                secs.ToString("F1") + "s";
-        if (t.Fallback && !t.Permanent) time = "*" + time;
         _secKey[idx] = key;
-        _secStr[idx] = time;
-        return time;
+        return _secStr[idx] = CdTimeFormat.Format(secs, t.Permanent, t.Fallback);
     }
 
+    // ── Charge / stack chip ──────────────────────────────────────────────────
+    // One string per slot, rebuilt only when the count changes (stacks / pending charges move at human speed).
+    private readonly int[]    _chipN   = new int[MaxTiles];
+    private readonly string[] _chipStr = new string[MaxTiles];
+
+    private string ChipLabel(int idx)
+    {
+        int n = TileChipCount(idx);
+        if (n == _chipN[idx] && _chipStr[idx] != null) return _chipStr[idx];
+        _chipN[idx] = n;
+        return _chipStr[idx] = n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
     // ── Fallback badge (icon-less tiles) ─────────────────────────────────────
     private readonly Dictionary<(TileKind, int), string> _abbrevCache = new();
 
@@ -148,6 +146,7 @@ public sealed partial class Plugin
     private void ClearBarCaches()
     {
         Array.Clear(_secKey); Array.Clear(_secStr);
+        Array.Clear(_chipN); Array.Clear(_chipStr);
         _abbrevCache.Clear();
         _iconCache.Clear();
         _overflowN = int.MinValue; _overflowStr = "";
