@@ -6,31 +6,6 @@ using Stellar.Abstractions.Services;
 
 namespace Stellar.CooldownBar;
 
-public sealed class BuffTrackEntry
-{
-    public int    BuffUuid     { get; }
-    public int    BuffBaseId   { get; internal set; }
-    public string BuffName     { get; internal set; } = "";
-    public int?   Visible      { get; internal set; }
-    public int?   BuffType     { get; internal set; }   // 0=Debuff 1=Gain 2=GainRecovery 3=Item
-    public bool   IsClientBuff { get; internal set; }
-    internal bool Hidden;   // true = internal/hidden buff (empty game Name OR empty Icon); off-mode bar skips these
-    public int    Layer        { get; internal set; }
-    public int    Level        { get; internal set; }
-    public int    SkillId      { get; internal set; }
-    public string SkillName    { get; internal set; } = "";
-    public long   Duration     { get; internal set; }   // ms; 0 = permanent
-
-    internal long  CreateTime;   // game time (ms) at (re)application; changes when a stack refreshes the buff
-    internal long  SnapTick;
-    internal float SnapRemain;
-
-    public float RemainSec => Duration == 0 ? -1f
-        : MathF.Max(0f, SnapRemain - (Environment.TickCount64 - SnapTick) / 1000f);
-
-    internal BuffTrackEntry(int buffUuid) { BuffUuid = buffUuid; }
-}
-
 internal static partial class BuffTrackPatch
 {
     public static IReadOnlyDictionary<int, BuffTrackEntry> ActiveBuffs => _activeBuffs;
@@ -47,59 +22,58 @@ internal static partial class BuffTrackPatch
     private static bool Active => _lastDemandTick != 0 && Environment.TickCount64 - _lastDemandTick < DemandWindowMs;
     internal static void MarkDemand() => _lastDemandTick = Environment.TickCount64;
 
-    // Reused across RefreshActiveBuffs calls so the ~60Hz refresh doesn't churn a fresh HashSet+List each time.
+    // Reused across RefreshActiveBuffs calls so the 10 Hz refresh doesn't churn a fresh HashSet+List each time.
     private static readonly HashSet<int> _live  = new();
     private static readonly List<int>    _stale = new();
 
-    // Player uuid is stable within a session; cache it to avoid a reflection Invoke + boxed long per buff event.
+    // Player uuid is stable within a session; cache it to avoid a game read per buff event.
     private static long _cachedPlayerUuid;
     private static long _playerUuidTick;
 
     private static object? _localBuffComp;
     private static object? _localClientBuffComp;
 
-    private static PropertyInfo? _piShowedBuffList;
-    private static bool          _showedListResolved;
+    // Every hot-path member below is a delegate bound ONCE by Getters (compiled, reflection fallback) — no
+    // PropertyInfo.GetValue / Invoke / boxing per read. Resolved lazily from the first live object (BuffTrackPatch.Resolve.cs).
+    private static Func<object, object?>? _getShowedBuffList;
+    private static bool                   _showedListResolved;
 
-    private static PropertyInfo? _piBuffItemUuid;
-    private static PropertyInfo? _piBuffItemBaseId;
-    private static PropertyInfo? _piBuffItemLayer;
-    private static PropertyInfo? _piBuffItemLevel;
-    private static PropertyInfo? _piBuffItemDuration;
-    private static PropertyInfo? _piBuffItemCreateTime;
-    private static bool          _buffItemFieldsResolved;
+    private static Func<object, long>? _bItemUuid, _bItemBaseId, _bItemLayer, _bItemLevel, _bItemDuration, _bItemCreateTime;
+    private static bool                _buffItemFieldsResolved;
 
-    private static PropertyInfo? _piClientBuffList;
-    private static bool          _clientListResolved;
+    private static Func<object, object?>? _getClientBuffList;
+    private static bool                   _clientListResolved;
 
-    private static PropertyInfo? _piClientBuffUuid;
-    private static PropertyInfo? _piClientBuffId;
-    private static PropertyInfo? _piClientBuffMaxLife;
-    private static PropertyInfo? _piClientBuffLayer;
-    private static PropertyInfo? _piClientBuffCreateTime;
-    private static FieldInfo?    _fiIsInValid;
-    private static bool          _clientBuffInfoResolved;
+    private static Func<object, long>?   _cUuid, _cId, _cLayer, _cInvalid;
+    private static Func<object, double>? _cMaxLife, _cCreateTime;
+    private static bool                  _clientBuffInfoResolved;
 
-    private static PropertyInfo? _piZComponentHost;
-    private static PropertyInfo? _piZEntityUuid;
-    private static bool          _hostReflResolved;
+    // Int-indexed list accessors (Count + get_Item(int)), bound per list TYPE — replaces StellarInterop.Enumerate.
+    private static Type?                       _srvListType, _cliListType;
+    private static Func<object, long>?         _srvCount, _cliCount;
+    private static Func<object, int, object?>? _srvItem, _cliItem;
 
-    private static object?     _entityMgrInst;
-    private static MethodInfo? _miGetPlayerUuid;
-    private static bool        _entityMgrResolved;
+    private static Func<object, object?>? _getHost;
+    private static Func<object, long>?    _getHostUuid;
+    private static bool                   _hostReflResolved;
+
+    private static object?             _entityMgrInst;
+    private static Func<object, long>? _getPlayerUuid;
+    private static bool                _entityMgrResolved;
 
     private static readonly Dictionary<int, int> _buffSourceSkillId = new();
-    private static PropertyInfo? _piFightSourceInfo;
-    private static PropertyInfo? _piFightSourceType;
-    private static PropertyInfo? _piFightSourceConfigId;
-    private static bool          _fightSourceResolved;
+    private static Func<object, long>?    _fsBuffUuid, _fsType, _fsConfigId;
+    private static Func<object, object?>? _fsInfo;
+    private static Type?                  _fsInfoType;
+    private static bool                   _fightSourceResolved;
 
     private static bool _loggedError;
     private static bool _diagLogged;
 
-    internal static bool Install(Harmony harmony, Action<string> log)
+    internal static bool Install(Harmony harmony, Action<string> log, Func<long> serverNowMs)
     {
         _log = log;
+        _serverNowMs = serverNowMs;   // framework clock (Tables.cs ServerNowMs) — never the game ZServerTime
 
         var buffCompType = StellarInterop.FindType("Panda.ZGame.BuffComp");
         if (buffCompType == null)
@@ -152,26 +126,22 @@ internal static partial class BuffTrackPatch
         // Harmony teardown is owned by IHarmonyHost, which auto-unpatches every instance on plugin dispose —
         // do NOT unpatch here (that would double-unpatch). Only reset our own transient reflection state.
         _activeBuffs.Clear();
+        _serverNowMs = null;
         _localBuffComp = _localClientBuffComp = null;
-        _piShowedBuffList = null; _showedListResolved = false;
+        _getShowedBuffList = null; _showedListResolved = false;
         ResetShowHiddenCaches();
-        _piBuffItemUuid = _piBuffItemBaseId = _piBuffItemLayer = _piBuffItemLevel = _piBuffItemDuration = null;
-        _piBuffItemCreateTime = null;
+        _bItemUuid = _bItemBaseId = _bItemLayer = _bItemLevel = _bItemDuration = _bItemCreateTime = null;
         _buffItemFieldsResolved = false;
-        _piClientBuffList = null; _clientListResolved = false;
-        _piClientBuffUuid = _piClientBuffId = _piClientBuffMaxLife = _piClientBuffLayer = null;
-        _piClientBuffCreateTime = null;
-        _fiIsInValid = null; _clientBuffInfoResolved = false;
-        _piZComponentHost = _piZEntityUuid = null; _hostReflResolved = false;
-        _entityMgrInst = null; _miGetPlayerUuid = null; _entityMgrResolved = false;
+        _getClientBuffList = null; _clientListResolved = false;
+        _cUuid = _cId = _cLayer = _cInvalid = null; _cMaxLife = _cCreateTime = null;
+        _clientBuffInfoResolved = false;
+        _srvListType = _cliListType = null; _srvCount = _cliCount = null; _srvItem = _cliItem = null;
+        _getHost = null; _getHostUuid = null; _hostReflResolved = false;
+        _entityMgrInst = null; _getPlayerUuid = null; _entityMgrResolved = false;
         _buffSourceSkillId.Clear();
-        _piFightSourceInfo = _piFightSourceType = _piFightSourceConfigId = null;
+        _fsBuffUuid = _fsType = _fsConfigId = null; _fsInfo = null; _fsInfoType = null;
         _fightSourceResolved = false;
-        _tableReflResolved = false;
-        _miGetBuffTable = _miGetBuffRow = null; _buffTableInst = null;
-        _piBuffRowName = _piBuffRowIcon = _piBuffRowVisible = _piBuffRowType = _piBuffRowSkillId = null;
-        _skillTableResolved = false;
-        _skillTableInst = null; _miGetSkillRow = null; _piSkillRowName = null;
+        ResetTableCaches();   // Tables.cs
         _loggedError = _diagLogged = false;
         _lastDemandTick = 0; _cachedPlayerUuid = 0; _playerUuidTick = 0;
         _live.Clear(); _stale.Clear();
@@ -190,20 +160,24 @@ internal static partial class BuffTrackPatch
             {
                 try
                 {
-                    foreach (var item in IterList(list))
+                    if (EnsureListAccess(list, ref _srvListType, ref _srvCount, ref _srvItem))
                     {
-                        if (item == null) continue;
-                        if (!_buffItemFieldsResolved) ResolveBuffItemFields(item);
-                        if (_piBuffItemUuid == null) break;
-                        int uuid = (int)(_piBuffItemUuid.GetValue(item) ?? 0);
-                        if (uuid == 0) continue;
-                        live.Add(uuid);
-                        int baseId = (int)(_piBuffItemBaseId?.GetValue(item)   ?? 0);
-                        int layer  = (int)(_piBuffItemLayer?.GetValue(item)    ?? 1);
-                        int level  = (int)(_piBuffItemLevel?.GetValue(item)    ?? 0);
-                        long durMs = (long)(_piBuffItemDuration?.GetValue(item) ?? 0L);
-                        long createMs = (long)(_piBuffItemCreateTime?.GetValue(item) ?? 0L);
-                        UpsertServerBuff(uuid, baseId, layer, level, durMs, createMs);
+                        for (int i = 0, n = (int)_srvCount!(list); i < n; i++)
+                        {
+                            var item = ItemAt(_srvItem!, list, i);
+                            if (item == null) continue;
+                            if (!_buffItemFieldsResolved) ResolveBuffItemFields(item);
+                            if (_bItemUuid == null) break;
+                            int uuid = (int)_bItemUuid(item);
+                            if (uuid == 0) continue;
+                            live.Add(uuid);
+                            int baseId    = _bItemBaseId     != null ? (int)_bItemBaseId(item) : 0;
+                            int layer     = _bItemLayer      != null ? (int)_bItemLayer(item)  : 1;
+                            int level     = _bItemLevel      != null ? (int)_bItemLevel(item)  : 0;
+                            long durMs    = _bItemDuration   != null ? _bItemDuration(item)    : 0L;
+                            long createMs = _bItemCreateTime != null ? _bItemCreateTime(item)  : 0L;
+                            UpsertServerBuff(uuid, baseId, layer, level, durMs, createMs);
+                        }
                     }
                 }
                 catch (Exception ex) { LogError("server list", ex); }
@@ -213,25 +187,29 @@ internal static partial class BuffTrackPatch
         if (_localClientBuffComp != null)
         {
             if (!_clientListResolved) ResolveClientList();
-            var list = _piClientBuffList?.GetValue(_localClientBuffComp);
+            var list = _getClientBuffList?.Invoke(_localClientBuffComp);
             if (list != null)
             {
                 try
                 {
-                    foreach (var item in IterList(list))
+                    if (EnsureListAccess(list, ref _cliListType, ref _cliCount, ref _cliItem))
                     {
-                        if (item == null) continue;
-                        if (!_clientBuffInfoResolved) ResolveClientBuffInfoRefl(item);
-                        if (_piClientBuffUuid == null) break;
-                        if (_fiIsInValid != null && (bool)(_fiIsInValid.GetValue(item) ?? false)) continue;
-                        int uuid   = (int)(_piClientBuffUuid.GetValue(item)    ?? 0);
-                        if (uuid == 0) continue;
-                        live.Add(uuid);
-                        int buffId = (int)(_piClientBuffId?.GetValue(item)     ?? 0);
-                        int layer  = (int)(_piClientBuffLayer?.GetValue(item)  ?? 1);
-                        float maxL = (float)(_piClientBuffMaxLife?.GetValue(item) ?? 0f);
-                        long createMs = (long)(double)(_piClientBuffCreateTime?.GetValue(item) ?? 0d);
-                        UpsertClientBuff(uuid, buffId, layer, maxL, createMs);
+                        for (int i = 0, n = (int)_cliCount!(list); i < n; i++)
+                        {
+                            var item = ItemAt(_cliItem!, list, i);
+                            if (item == null) continue;
+                            if (!_clientBuffInfoResolved) ResolveClientBuffInfoRefl(item);
+                            if (_cUuid == null) break;
+                            if (_cInvalid != null && _cInvalid(item) != 0) continue;
+                            int uuid = (int)_cUuid(item);
+                            if (uuid == 0) continue;
+                            live.Add(uuid);
+                            int buffId    = _cId         != null ? (int)_cId(item)          : 0;
+                            int layer     = _cLayer      != null ? (int)_cLayer(item)       : 1;
+                            float maxL    = _cMaxLife    != null ? (float)_cMaxLife(item)   : 0f;
+                            long createMs = _cCreateTime != null ? (long)_cCreateTime(item) : 0L;
+                            UpsertClientBuff(uuid, buffId, layer, maxL, createMs);
+                        }
                     }
                 }
                 catch (Exception ex) { LogError("client list", ex); }
@@ -318,7 +296,9 @@ internal static partial class BuffTrackPatch
 
     private static void PostfixOnAddBuff(object __instance, object __0, bool __1)
     {
+        using var _perf = CdPerf.Hook();   // [CdPerf] postfix bucket — default struct unless the probe is on
         if (!Active) return;
+        CdPerf.HookFull();
         try
         {
             if (!IsLocalPlayer(GetHostEntityUuid(__instance))) return;
@@ -327,46 +307,11 @@ internal static partial class BuffTrackPatch
         }
         catch (Exception ex) { LogError("PostfixOnAddBuff", ex); }
     }
-
-    private static PropertyInfo? _piBuffInfoUuid;
-
-    private static void CacheBuffFightSource(object buffInfo)
-    {
-        try
-        {
-            if (!_fightSourceResolved)
-            {
-                _fightSourceResolved = true;
-                foreach (var p in buffInfo.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
-                {
-                    if (p.Name == "BuffUuid")        _piBuffInfoUuid    = p;
-                    if (p.Name == "FightSourceInfo") _piFightSourceInfo = p;
-                }
-            }
-            if (_piBuffInfoUuid == null || _piFightSourceInfo == null) return;
-            int uuid = (int)(_piBuffInfoUuid.GetValue(buffInfo) ?? 0);
-            if (uuid == 0) return;
-            var fsi = _piFightSourceInfo.GetValue(buffInfo);
-            if (fsi == null) return;
-            if (_piFightSourceType == null)
-            {
-                foreach (var p in fsi.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
-                {
-                    if (p.Name == "FightSourceType") _piFightSourceType     = p;
-                    if (p.Name == "SourceConfigId")  _piFightSourceConfigId = p;
-                }
-            }
-            int sourceType     = (int)(_piFightSourceType?.GetValue(fsi)     ?? -1);
-            int sourceConfigId = (int)(_piFightSourceConfigId?.GetValue(fsi) ?? 0);
-            if (sourceType == 0 && sourceConfigId > 0)
-                _buffSourceSkillId[uuid] = sourceConfigId;
-        }
-        catch { }
-    }
-
     private static void PostfixClientAddBuff(object __instance, object __0, int __1, int __2, float __3, object __result)
     {
+        using var _perf = CdPerf.Hook();   // [CdPerf] postfix bucket — default struct unless the probe is on
         if (!Active) return;
+        CdPerf.HookFull();
         try
         {
             if (!IsLocalPlayer(GetHostEntityUuid(__instance))) return;
@@ -380,102 +325,5 @@ internal static partial class BuffTrackPatch
         if (_loggedError) return;
         _loggedError = true;
         _log?.Invoke($"[Buff] {src}: {ex.InnerException?.Message ?? ex.Message}");
-    }
-
-    // Both buff lists are int-indexed ZLists (Count + Item[int]); the framework floor walks them.
-    private static IEnumerable<object?> IterList(object list) => StellarInterop.Enumerate(list);
-
-    private static long GetPlayerUuid()
-    {
-        long now = Environment.TickCount64;
-        if (_cachedPlayerUuid != 0 && now - _playerUuidTick < 2000) return _cachedPlayerUuid;
-        if (!_entityMgrResolved) ResolveEntityMgr();
-        if (_entityMgrInst == null || _miGetPlayerUuid == null) return 0L;
-        _cachedPlayerUuid = (long)_miGetPlayerUuid.Invoke(_entityMgrInst, null)!;
-        _playerUuidTick   = now;
-        return _cachedPlayerUuid;
-    }
-
-    private static bool IsLocalPlayer(long hostUuid)
-    {
-        var puuid = GetPlayerUuid();
-        return puuid != 0L && hostUuid == puuid;
-    }
-
-    private static void ResolveEntityMgr()
-    {
-        var t = StellarInterop.FindType("Panda.ZGame.ZEntityMgr");
-        if (t == null) { _entityMgrResolved = true; return; }
-        _entityMgrInst   = StellarInterop.GetSingleton(t);
-        _miGetPlayerUuid = t.GetMethod("get_PlayerUuid", BindingFlags.Public | BindingFlags.Instance);
-        if (_entityMgrInst != null) _entityMgrResolved = true;
-    }
-
-    private static long GetHostEntityUuid(object comp)
-    {
-        if (!_hostReflResolved) ResolveHostRefl(comp);
-        if (_piZComponentHost == null || _piZEntityUuid == null) return 0L;
-        var host = _piZComponentHost.GetValue(comp);
-        return host == null ? 0L : (long)(_piZEntityUuid.GetValue(host) ?? 0L);
-    }
-
-    private static void ResolveHostRefl(object comp)
-    {
-        _hostReflResolved = true;
-        var cur = comp.GetType();
-        while (cur != null && _piZComponentHost == null)
-        {
-            _piZComponentHost = cur.GetProperty("Host", BindingFlags.NonPublic | BindingFlags.Instance)
-                             ?? cur.GetProperty("Host", BindingFlags.Public    | BindingFlags.Instance);
-            cur = cur.BaseType;
-        }
-        if (_piZComponentHost != null)
-            _piZEntityUuid = _piZComponentHost.PropertyType
-                .GetProperty("Uuid", BindingFlags.Public | BindingFlags.Instance);
-    }
-
-    private static void ResolveShowedList()
-    {
-        _showedListResolved = true;
-        PropertyInfo? best = null; int bestPrio = 99;
-        foreach (var p in _localBuffComp!.GetType().GetProperties(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance))
-        {
-            int prio = p.Name switch { "pShowedBuffList_" => 0, "showedBuffList_" => 1, "pBuffList_" => 2, "buffList_" => 3, _ => 99 };
-            if (prio < bestPrio) { best = p; bestPrio = prio; if (bestPrio == 0) break; }
-        }
-        _piShowedBuffList = best;
-    }
-
-    private static void ResolveBuffItemFields(object item)
-    {
-        _buffItemFieldsResolved = true;
-        foreach (var p in item.GetType().GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
-        {
-            if      (p.Name == "BuffUuid")   _piBuffItemUuid     = p;
-            else if (p.Name == "BuffBaseId") _piBuffItemBaseId   = p;
-            else if (p.Name == "Layer")      _piBuffItemLayer    = p;
-            else if (p.Name == "Level")      _piBuffItemLevel    = p;
-            else if (p.Name == "Duration")   _piBuffItemDuration = p;
-            else if (p.Name == "CreateTime") _piBuffItemCreateTime = p;
-        }
-    }
-
-    private static void ResolveClientList()
-    {
-        _clientListResolved = true;
-        _piClientBuffList = _localClientBuffComp!.GetType()
-            .GetProperty("BuffList", BindingFlags.Public | BindingFlags.Instance);
-    }
-
-    private static void ResolveClientBuffInfoRefl(object item)
-    {
-        _clientBuffInfoResolved = true;
-        var t = item.GetType();
-        _piClientBuffUuid    = t.GetProperty("BuffUuid",     BindingFlags.Public | BindingFlags.Instance);
-        _piClientBuffId      = t.GetProperty("BuffId",       BindingFlags.Public | BindingFlags.Instance);
-        _piClientBuffMaxLife = t.GetProperty("BuffMaxLife",  BindingFlags.Public | BindingFlags.Instance);
-        _piClientBuffLayer   = t.GetProperty("CurrentLayer", BindingFlags.Public | BindingFlags.Instance);
-        _piClientBuffCreateTime = t.GetProperty("CreateTime", BindingFlags.Public | BindingFlags.Instance);
-        _fiIsInValid         = t.GetField("IsInValid",       BindingFlags.Public | BindingFlags.Instance);
     }
 }

@@ -26,11 +26,34 @@ public sealed partial class Plugin
     private int _rowsVisible;     // rows that fit in current height (1 or MaxRows)
     private int _totalTileCount;  // raw active count before display cap (for overflow indicator)
 
-    // _bar.Rect is stale during resize (TickResize writes sizeDelta directly, bypassing SetRect).
-    // Cache the root RectTransform and read rect.width/height directly for live values.
+    // Live bar size while the user resizes: TickResize writes the window root's sizeDelta directly, bypassing SetRect.
+    // Read the root RectTransform's rect. The framework names the window root GameObject after WindowSpec.Id
+    // (WindowBuilder.Chrome*.cs: UGuiPrimitives.NewRect(spec.Id, parent)), so Find("cooldownbar.main") hits it.
+    // (Framework 2.30's IWindowControl.Rect → WindowRenderer.GetRect also reads token.Rect.rect live — token.Rect IS
+    // that root — so _bar.Rect is a correct fallback there; the cached-RT path keeps older frameworks live too.)
+    // The window is destroyed on hide and remounted on show, so the cached RT can become Unity fake-null: re-validate
+    // with Unity's == (the old `??=` used a plain reference check and kept a dead object), and retry Find at most once
+    // per second while missing — GameObject.Find walks the whole scene.
     private RectTransform? _barRt;
-    private float BarWidth  => (_barRt ??= GameObject.Find("cooldownbar.main")?.GetComponent<RectTransform>()) != null ? _barRt!.rect.width  : _bar.Rect.Width;
-    private float BarHeight => (_barRt ??= GameObject.Find("cooldownbar.main")?.GetComponent<RectTransform>()) != null ? _barRt!.rect.height : _bar.Rect.Height;
+    private long _barRtRetryAt;
+
+    private RectTransform? BarRt()
+    {
+        var rt = _barRt;
+        if (!ReferenceEquals(rt, null) && rt == null) rt = _barRt = null;   // destroyed (remount) → look it up again
+        if (ReferenceEquals(rt, null))
+        {
+            long now = Environment.TickCount64;
+            if (now < _barRtRetryAt) return null;
+            _barRtRetryAt = now + 1000;
+            var go = GameObject.Find("cooldownbar.main");
+            rt = _barRt = go != null ? go.GetComponent<RectTransform>() : null;
+        }
+        return rt;
+    }
+
+    private float BarWidth  { get { var rt = BarRt(); return rt != null ? rt.rect.width  : _bar.Rect.Width;  } }
+    private float BarHeight { get { var rt = BarRt(); return rt != null ? rt.rect.height : _bar.Rect.Height; } }
 
     private void UpdateArrivalOrder(int n)
     {
@@ -54,6 +77,8 @@ public sealed partial class Plugin
     {
         BuffTrackPatch.RefreshActiveBuffs();
         int n = 0;
+        long now = Environment.TickCount64;   // the bar's one clock (TrackedTile.SampleTick, BuffTrackEntry.SnapTick)
+        _cdGen++;                             // Plugin.Smooth.cs — stamps live cooldown state; the rest is pruned below
 
         bool skillExclude  = _selection.SkillMode  == TrackMode.ExcludeBelow;
         bool debuffExclude = _selection.DebuffMode == TrackMode.ExcludeBelow;
@@ -69,11 +94,12 @@ public sealed partial class Plugin
             if (skillExclude ? inList : !inList) continue;
             float rem = SkillCDPatch.GetRemainSec(entry);
             if (rem <= 0f) continue;
-            float fill     = Clamp01(1f - rem / Math.Max(0.001f, entry.TotalSec));
+            SampleCooldown(entry, rem, now, out float disp, out float rate);   // Plugin.Smooth.cs / CdSmooth.cs — measured rate, no jitter tick-up, resync
             bool isImagine = entry.MaxCharges > 1;
             _tiles[n++] = new TrackedTile(TileKind.Cooldown, baseId, isImagine, baseId,
-                fill, (int)(rem * 1000f), isImagine ? entry.PendingCharges : 0, false);
+                disp, now, entry.TotalSec, rate, isImagine ? entry.PendingCharges : 0, false);
         }
+        PruneCdSmooth();
 
         foreach (var entry in BuffTrackPatch.ActiveBuffs.Values)
         {
@@ -87,14 +113,13 @@ public sealed partial class Plugin
             bool dbInList = _selection.IsDebuffTracked(entry.BuffBaseId);
             if (debuffExclude ? dbInList : !dbInList) continue;
 
-            bool dbPerm  = entry.Duration == 0;
-            float remSec = dbPerm ? -1f : entry.RemainSec;
-            float fill   = dbPerm ? 1f : Clamp01(remSec / Math.Max(0.001f, entry.Duration / 1000f));
             // Icon skill = the resolved Battle-Imagine CARD for a lockout (e.g. Mechanical Failure -> 3971), else the
             // live source skill. Passing entry.SkillId for a lockout drew the generic debuff icon (2.2.3 bug).
+            // Sample = the entry's own server-clock snap (SnapRemain at SnapTick), drained at exactly 1.0 — the same
+            // extrapolation BuffTrackEntry.RemainSec does, now evaluated per frame by the Funcs.
             _tiles[n++] = new TrackedTile(TileKind.Debuff, entry.BuffBaseId, cls.IsImagine,
                 DebuffAttribution.TileIconSkill(cls, entry.SkillId),
-                fill, dbPerm ? -1 : (int)(remSec * 1000f), entry.Layer, false);
+                BuffSample(entry), entry.SnapTick, entry.Duration / 1000f, 1f, entry.Layer, false);
         }
 
         foreach (var entry in BuffTrackPatch.ActiveBuffs.Values)
@@ -106,11 +131,8 @@ public sealed partial class Plugin
             bool bfInList = _selection.IsBuffTracked(entry.BuffBaseId);
             if (buffExclude ? bfInList : !bfInList) continue;
 
-            bool bfPerm   = entry.Duration == 0;
-            float bRemSec = bfPerm ? -1f : entry.RemainSec;
-            float bFill   = bfPerm ? 1f : Clamp01(bRemSec / Math.Max(0.001f, entry.Duration / 1000f));
             _tiles[n++] = new TrackedTile(TileKind.Buff, entry.BuffBaseId, false, entry.SkillId,
-                bFill, bfPerm ? -1 : (int)(bRemSec * 1000f), entry.Layer, false);
+                BuffSample(entry), entry.SnapTick, entry.Duration / 1000f, 1f, entry.Layer, false);
         }
 
         UpdateArrivalOrder(n);
@@ -141,7 +163,8 @@ public sealed partial class Plugin
         return Math.Min(MaxRows, Math.Max(1, (int)((h - BaseH) / (TileRowH + TileVGap)) + 1));
     }
 
-    private static float Clamp01(float v) => v < 0f ? 0f : v > 1f ? 1f : v;
+    // A buff/debuff tile's sample: -1 = permanent (Duration 0), else SnapRemain (remaining at SnapTick).
+    private static float BuffSample(BuffTrackEntry e) => e.Duration == 0 ? -1f : (e.SnapRemain < 0f ? 0f : e.SnapRemain);
 
     // Memoize success only — table may finish loading after first CD arrives.
     private readonly Dictionary<int, int> _baseSkillMemo = new();

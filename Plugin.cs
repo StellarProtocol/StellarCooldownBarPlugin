@@ -43,17 +43,19 @@ public sealed partial class Plugin : IStellarPlugin
         _services = services;
         _loc = services.Localization;
         _cfg = _services.Config.GetSection("cooldownbar");
+        InitPerf();   // Plugin.Perf.cs — diagnostics-gated [CdPerf] probe; must precede BuildRoot
         _bgOpacity = _cfg.Get("bar.bg_opacity", 0f);
         _showHidden = _cfg.Get("bar.show_hidden", false);
         BuffTrackPatch.ShowHidden = _showHidden;               // full-vs-showed buff list source for the bar
-        TranslatedBuffText.EnsureLoaded(_services.Log.Info);   // English NameDesign labels (one-time lazy load)
+        TranslatedBuffText.EnsureLoaded();   // English NameDesign labels — parsed on a background task; OnUpdate polls ConsumeLoaded
         _selection = CooldownBarSelection.Load(_cfg);
         _attr = new DebuffAttribution(
             buffSkillId:    id => _services.GameData.Combat.GetBuff(id)?.SkillId ?? 0,
             imagineSkillOf: sk => _services.ResonanceData.GetImagineForSkill(sk)?.SkillId ?? 0);
         _tiles = new TrackedTile[MaxTiles];
         SkillCDPatch.Install(_services.Harmony.Create("skillcd"), _services.Log.Info);
-        BuffTrackPatch.Install(_services.Harmony.Create("buff"), _services.Log.Info);
+        BuffTrackPatch.Install(_services.Harmony.Create("buff"), _services.Log.Info,
+            () => _services.CombatSnapshot.ServerNowMs);   // framework server clock (Server-Clock-and-Ping-HUD.md)
 
         // Borderless window (chrome-less, HUD-like) via WindowBuilder — the icon-capable render path
         // (the HUD builder has no GameTextureElement support). Mirrors CombatMeter's overlay.
@@ -69,7 +71,8 @@ public sealed partial class Plugin : IStellarPlugin
               // In-world HUD: draw only in the World phase, and hide behind blocking overlays (old AutoHideBehindGameMenus)
               // and the line-selector / any menu.
               ShouldRender = () => _services.ClientState.Phase == GamePhase.World
-                                   && (_services.ClientState.UiState & (GameUIState.Blocking | GameUIState.AnyMenu)) == 0,
+                                   && (_services.ClientState.UiState & (GameUIState.Blocking | GameUIState.AnyMenu)) == 0
+                                   && !_perfOff,   // [CdPerf] in-session off control (always false unless probe on)
               Resizable = true, MinWidth = 150f, MaxWidth = 1600f, MinHeight = 130f, MaxHeight = 270f,
               BackgroundOpacity = () => _bgOpacity },
             BuildRoot()));
@@ -103,6 +106,7 @@ public sealed partial class Plugin : IStellarPlugin
 
     public void Dispose()
     {
+        FlushBgSave();   // an opacity drag released just before unload still persists
         _launcherEntry.Dispose();
         _services.Framework.Update -= OnUpdate;
         SkillCDPatch.Uninstall();
@@ -111,30 +115,57 @@ public sealed partial class Plugin : IStellarPlugin
         _tooltip.Remove();
         _settings.Remove();
         _bar.Remove();
+        ClearBarCaches();   // Plugin.Bar.Cache.cs
     }
 
     private float _rebuildAccum;
-    private const float RebuildIntervalS = 1f / 60f;   // cap buff/CD data refresh at 60Hz (smooth; still caps on high-fps setups)
+    // Game reads (buff list walk + CD queries) at 10 Hz. The bar still moves smoothly: the overlay Funcs extrapolate each
+    // tile's sample every frame (TrackedTile.RemainAt / Plugin.Smooth.cs). The demand window (500 ms) stays > 100 ms,
+    // so the postfixes stay awake between reads. (The old 1/60 s cap never engaged: OnUpdate arrives at ~30 Hz.)
+    private const float RebuildIntervalS = 0.1f;
 
     private void OnUpdate(float deltaTime)
     {
-        // Only read buff/CD state when the bar is actually visible, and at ~60Hz — not every frame.
-        // RefreshActiveBuffs rebuilds collections + walks the buff lists via reflection; running it every
-        // frame (even while the bar is hidden) was a steady combat-time GC source. The window's Funcs still
-        // draw every frame from the last-built _tiles, so the bar stays smooth; only the data refresh throttles.
-        if (_bar.IsShown)
+        var perfUpdate = CdPerf.Begin();   // Plugin.Perf.cs — default (no Stopwatch read) unless the probe is on
+        // Only read buff/CD state when the bar is actually visible, and at 10 Hz — not every frame.
+        // RefreshActiveBuffs walks the buff lists via reflection; running it every frame (even while the bar is
+        // hidden) was a steady combat-time GC source. The window's Funcs still draw every frame from the last-built
+        // _tiles samples, so the bar stays smooth; only the data refresh throttles.
+        if (_bar.IsShown && !_perfOff)
         {
             _rebuildAccum += deltaTime;
             if (_rebuildAccum >= RebuildIntervalS)
             {
-                _rebuildAccum = 0f;
+                // Carry the remainder so ~30 Hz ticks still average 10 reads/s (a reset to 0 would give 7.5 Hz);
+                // clamp after a long stall so we don't fire a burst of catch-up reads.
+                _rebuildAccum -= RebuildIntervalS;
+                if (_rebuildAccum > RebuildIntervalS) _rebuildAccum = 0f;
+                var perfRefresh = CdPerf.Begin();
                 BuffTrackPatch.MarkDemand();   // keep the per-entity buff/CD postfixes awake only while refreshing
                 SkillCDPatch.MarkDemand();
                 RebuildSnapshot();             // Plugin.Seen.cs
+                CdPerf.End(CdPerf.Refresh, perfRefresh);
             }
         }
+        if (TranslatedBuffText.ConsumeLoaded(out var loadMsg)) OnTranslatedTextLoaded(loadMsg);   // one int read/frame
+        BgSaveTick();             // Plugin.Settings.cs — debounced config write after an opacity-slider drag
         TickTooltipPlace();       // Plugin.Tooltip.cs — re-assert cursor rect after destroy-on-hide remount
         LogSnapshotDiag(deltaTime);   // Plugin.Diagnostics.cs — gated on STELLAR_DIAGNOSTICS
+        if (CdPerf.On) PerfTick(deltaTime, perfUpdate);   // Plugin.Perf.cs
+    }
+
+    // Main thread, once, when the background BuffTable.json parse lands (TranslatedBuffText). Labels resolved during the
+    // load window used the game-name fallback: drop the bar's cached badges, and if the Show-hidden picker tables were
+    // already built from fallback labels, rebuild them (now if the settings window is open, else on next access).
+    private void OnTranslatedTextLoaded(string msg)
+    {
+        _services.Log.Info(msg);
+        ClearBarCaches();   // Plugin.Bar.Cache.cs
+        if (_showHidden && _buffTabLoaded)
+        {
+            _buffTabLoaded = false;
+            if (_settings.IsShown) EnsureBuffTabLoaded();   // re-applies the active debuff/buff search filters
+        }
     }
 
     private static byte[]? LoadIconPng()

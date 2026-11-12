@@ -32,10 +32,30 @@ public sealed partial class Plugin
             BuildSettingsRoot(),
             OnClose: () => _settings.SetVisible(false)));
 
+    // SliderElement calls this on EVERY drag frame, and a config Save is a file write — one per frame while dragging
+    // hitched the game thread. Apply live + set in memory now; write to disk ~0.5 s after the last change (BgSaveTick in
+    // OnUpdate), and flush on Dispose. Mirrors StatInspector 7fc445a (Plugin-Performance-Rules.md §5).
+    private const long BgSaveDelayMs = 500;
+    private long _bgSaveAt = -1;   // Environment.TickCount64 when the pending save is due; -1 = nothing pending
+
     private void SetBgOpacity(float v)
     {
+        if (v == _bgOpacity) return;
         _bgOpacity = v;
         _cfg.Set("bar.bg_opacity", v);
+        _bgSaveAt = System.Environment.TickCount64 + BgSaveDelayMs;
+    }
+
+    private void BgSaveTick()
+    {
+        if (_bgSaveAt < 0 || System.Environment.TickCount64 < _bgSaveAt) return;
+        FlushBgSave();
+    }
+
+    private void FlushBgSave()
+    {
+        if (_bgSaveAt < 0) return;
+        _bgSaveAt = -1;
         _cfg.Save();
     }
 
@@ -49,6 +69,7 @@ public sealed partial class Plugin
         // The Name/Icon filter (and the buff-group label resolution) depends on this flag, so drop the loaded
         // picker tables and rebuild them on next access, then re-apply the active search filters so an already-open
         // list repopulates immediately — without needing to close and reopen the settings window.
+        ClearBarCaches();   // Plugin.Bar.Cache.cs — tile labels/icons re-resolve under the new mode
         _buffTabLoaded = false;
         _stBaseLoaded  = false;
         _seenDirty     = true;
