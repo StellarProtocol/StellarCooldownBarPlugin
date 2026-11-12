@@ -114,7 +114,10 @@ public sealed partial class Plugin
         _selFlashFull = full;
         if (full) _selFlashFullLabel = _loc.TFormat("cd.sel.max", MaxPlaced);
         _selFooterNote = full
-            ? _loc.TFormat("cd.placed.full", MaxPlaced, name)   // "Placed mode holds up to 30 effects. Untick one to place “X”."
+            // "Max 30 placed. Untick one first." — no effect name: it must fit ONE line beside the Untick all pill in
+            // every locale (~248 px of plain 14 px text; the longest, id, ≈ 223 px), and the clicked row's own amber
+            // "30 max" flash already says which effect it was.
+            ? _loc.TFormat("cd.placed.full", MaxPlaced)
             : _loc.TFormat(added ? "cd.sel.feedback.added" : "cd.sel.feedback.removed", name, SelActiveTicked);
         _selFooterNoteAt = now;
         _untickConfirmAt = -1f;   // any other action dismisses a pending confirm

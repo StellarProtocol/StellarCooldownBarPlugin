@@ -36,7 +36,7 @@
   "cd.n.debuffs.one": "{0} debuff",
   "cd.n.skills": "{0} skill",
   "cd.n.skills.one": "{0} skill",
-  "cd.placed.full": "Mode Terpisah menampung hingga {0} efek. Hapus centang satu untuk memasang “{1}”.",
+  "cd.placed.full": "Maks. {0}. Hapus centang satu dulu.",
   "cd.placed.note": "Terpisah hanya menampilkan yang dicentang, masing-masing sebagai ubin.",
   "cd.search.buffs": "Cari buff…",
   "cd.search.debuffs": "Cari debuff…",

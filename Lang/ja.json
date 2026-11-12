@@ -36,7 +36,7 @@
   "cd.n.debuffs.one": "デバフ {0}",
   "cd.n.skills": "スキル {0}",
   "cd.n.skills.one": "スキル {0}",
-  "cd.placed.full": "個別配置は最大{0}個までです。「{1}」を配置するには、どれかのチェックを外してください。",
+  "cd.placed.full": "最大{0}個。先に1つ外してください",
   "cd.placed.note": "個別配置ではチェックした効果だけを、それぞれタイルで表示します。",
   "cd.search.buffs": "バフを検索…",
   "cd.search.debuffs": "デバフを検索…",

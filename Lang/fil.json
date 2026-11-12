@@ -36,7 +36,7 @@
   "cd.n.debuffs.one": "{0} debuff",
   "cd.n.skills": "{0} skill",
   "cd.n.skills.one": "{0} skill",
-  "cd.placed.full": "Hanggang {0} epekto lang ang kaya ng Nakahiwalay. Mag-untick ng isa para mailagay ang “{1}”.",
+  "cd.placed.full": "Max {0} lang. Alisin muna ang isa.",
   "cd.placed.note": "Ipinapakita lang ang mga naka-tick, bawat isa bilang sariling tile.",
   "cd.search.buffs": "Maghanap ng buff…",
   "cd.search.debuffs": "Maghanap ng debuff…",

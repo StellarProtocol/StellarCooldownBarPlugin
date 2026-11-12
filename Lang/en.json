@@ -36,7 +36,7 @@
   "cd.n.debuffs.one": "{0} debuff",
   "cd.n.skills": "{0} skills",
   "cd.n.skills.one": "{0} skill",
-  "cd.placed.full": "Placed mode holds up to {0} effects. Untick one to place “{1}”.",
+  "cd.placed.full": "Max {0} placed. Untick one first.",
   "cd.placed.note": "Placed shows only the ticked effects, each as its own tile.",
   "cd.search.buffs": "Search buffs…",
   "cd.search.debuffs": "Search debuffs…",
