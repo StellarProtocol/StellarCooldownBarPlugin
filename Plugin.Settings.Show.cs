@@ -153,14 +153,17 @@ public sealed partial class Plugin
     // pre-build fill) — every kind chip, the header status and the footer count grouped rows, so all three kinds must be
     // loaded before any number shows ("…" until then). A failed load (tables not ready yet) retries on the next refresh
     // while it stays open. Each Ensure is a single bool check once loaded.
+    // While hidden it reports 0 rows: the pre-build fill (WindowSpec.Prebuild) runs at world entry, and since the skill
+    // table loads eagerly there, a fill that saw 632 rows bound all 14 pool slots in ONE apply: 14 names + bubbles and
+    // 14 icon requests (an Imagine lookup + a LoadAssetAsync each, two log lines each), "apply:cooldownbar.settings
+    // =85 ms" plus a 47 ms canvas rebuild in a single frame ([Hitch], 2026-11-13). The rows now fill on the first real
+    // open, as they did before the eager load; the rest of the window (header, panels, chips, counts) stays pre-built.
     private int SelListCount()
     {
-        if (_settings != null && _settings.IsShown)
-        {
-            EnsureSkillTabLoaded();
-            EnsureBuffTabLoaded();
-            TryNormalizeSelection();   // Plugin.Normalize.cs — once per session, the first time both are loaded
-        }
+        if (_settings == null || !_settings.IsShown) return 0;
+        EnsureSkillTabLoaded();
+        EnsureBuffTabLoaded();
+        TryNormalizeSelection();   // Plugin.Normalize.cs — once per session, the first time both are loaded
         return SelFiltCount;
     }
 

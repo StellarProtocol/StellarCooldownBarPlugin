@@ -54,8 +54,8 @@ public sealed partial class Plugin
                                      && (_services.ClientState.UiState & GameUIState.Loading) == 0,
                 // Framework pre-build (fw 2.30.0): the 14-row pool is built at the title screen and filled off-screen
                 // once in the world, so the first open is a re-show. The value lambdas only read plugin fields (+ _loc);
-                // the table loads wait for a real show (SelListCount), so the fill never runs the reflection walks
-                // behind the player's back.
+                // the table loads AND the list rows wait for a real show (SelListCount reports 0 while hidden), so the
+                // fill never runs the reflection walks or binds 14 rows + icon loads in one frame.
                 Prebuild = true,
             },
             BuildSettingsRoot(),
