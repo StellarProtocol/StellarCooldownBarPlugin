@@ -72,9 +72,10 @@ internal static partial class BuffTrackPatch
     private static bool _loggedError;
     private static bool _diagLogged;
 
-    internal static bool Install(Harmony harmony, Action<string> log)
+    internal static bool Install(Harmony harmony, Action<string> log, Func<long> serverNowMs)
     {
         _log = log;
+        _serverNowMs = serverNowMs;   // framework clock (Tables.cs ServerNowMs) — never the game ZServerTime
 
         var buffCompType = StellarInterop.FindType("Panda.ZGame.BuffComp");
         if (buffCompType == null)
@@ -127,6 +128,7 @@ internal static partial class BuffTrackPatch
         // Harmony teardown is owned by IHarmonyHost, which auto-unpatches every instance on plugin dispose —
         // do NOT unpatch here (that would double-unpatch). Only reset our own transient reflection state.
         _activeBuffs.Clear();
+        _serverNowMs = null;
         _localBuffComp = _localClientBuffComp = null;
         _piShowedBuffList = null; _showedListResolved = false;
         ResetShowHiddenCaches();

@@ -45,7 +45,6 @@ internal static partial class BuffTrackPatch
     private static void ResetShowHiddenCaches()
     {
         _piFullBuffList = null; _fullListResolved = false;
-        _serverTimeResolved = false; _serverTimeInst = null; _miGetServerTime = null;
     }
 
     // ── Server clock (true buff remaining = CreateTime + Duration − serverNow) ────
@@ -54,32 +53,24 @@ internal static partial class BuffTrackPatch
     // is usually partway through its life, so full-duration seeding over-reads remaining — and on a zone change
     // re-syncs the tile back to full. The game itself computes remaining as CreateTime + Duration − serverNow (all
     // ms, server-synced Unix epoch); mirror that. See Buff-Tracking.md §7.
-    private static bool        _serverTimeResolved;
-    private static object?     _serverTimeInst;
-    private static MethodInfo? _miGetServerTime;
+    // ⛔ Do NOT reflect into the game's ZServerTime singleton for "now" (the old path here did GetSingleton +
+    // GetServerTime): touching that instance from a plugin stalls its heartbeat, freezing the ping HUD at 0 ms AND
+    // day/night game-wide (Server-Clock-and-Ping-HUD.md). The framework's interpolated clock
+    // IPluginServices.CombatSnapshot.ServerNowMs is the same Unix-epoch-ms domain and never touches ZServerTime;
+    // Plugin hands it in at Install. 0 = not yet synced → ComputeSnapRemain's ≥1.6e12 guard falls back to full.
+    private static Func<long>? _serverNowMs;
 
-    // Current server time in ms (Unix-epoch, same clock as BuffItem.CreateTime/Duration). 0 = unavailable.
-    // Lazy-retry the singleton while it's still null (mirrors ResolveEntityMgr) so a frame-1 miss — before the
-    // singleton is up — doesn't permanently disable the feature; the MethodInfo caches once resolved.
     private static long ServerNowMs()
     {
-        if (!_serverTimeResolved)
-        {
-            var t = StellarInterop.FindType("Panda.Utility.ZServerTime");
-            if (t == null) { _serverTimeResolved = true; return 0L; }   // type gone → give up permanently
-            _serverTimeInst  ??= StellarInterop.GetSingleton(t);
-            _miGetServerTime ??= t.GetMethod("GetServerTime", BindingFlags.Public | BindingFlags.Instance);
-            if (_serverTimeInst != null) _serverTimeResolved = true;    // latch only once the instance resolves
-        }
-        if (_serverTimeInst == null || _miGetServerTime == null) return 0L;
-        try { return (long)(_miGetServerTime.Invoke(_serverTimeInst, null) ?? 0L); }
-        catch { return 0L; }
+        var f = _serverNowMs;
+        if (f == null) return 0L;
+        try { return f(); } catch { return 0L; }
     }
 
     // True remaining seconds from the server clock: CreateTime + Duration − serverNow (all ms, same epoch),
     // clamped to [0, full]. Falls back to full duration (old behavior) unless BOTH the server clock AND the
     // create time are plausible synced Unix-epoch ms (≥ 1.6e12 ≈ 2020-09):
-    //  • serverNow guard — ZServerTime returns a tiny/1970 value before the first server-time sync; trusting it
+    //  • serverNow guard — the framework clock reads 0 (and ZServerTime a 1970 value) before the first sync; trusting it
     //    would hide every timed buff until sync.
     //  • createMs guard — server buffs (BuffItem.CreateTime) are verified server-epoch, but client buffs
     //    (ClientBuffInfo.CreateTime, double→long) have an UNVERIFIED epoch. If it were a small game-time value,

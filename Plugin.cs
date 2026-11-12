@@ -54,7 +54,8 @@ public sealed partial class Plugin : IStellarPlugin
             imagineSkillOf: sk => _services.ResonanceData.GetImagineForSkill(sk)?.SkillId ?? 0);
         _tiles = new TrackedTile[MaxTiles];
         SkillCDPatch.Install(_services.Harmony.Create("skillcd"), _services.Log.Info);
-        BuffTrackPatch.Install(_services.Harmony.Create("buff"), _services.Log.Info);
+        BuffTrackPatch.Install(_services.Harmony.Create("buff"), _services.Log.Info,
+            () => _services.CombatSnapshot.ServerNowMs);   // framework server clock (Server-Clock-and-Ping-HUD.md)
 
         // Borderless window (chrome-less, HUD-like) via WindowBuilder — the icon-capable render path
         // (the HUD builder has no GameTextureElement support). Mirrors CombatMeter's overlay.
