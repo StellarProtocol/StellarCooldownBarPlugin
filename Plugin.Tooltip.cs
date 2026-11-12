@@ -55,6 +55,13 @@ public sealed partial class Plugin
     // open time; IsShown becoming true signals the mount landed). Called from OnUpdate.
     internal void TickTooltipPlace()
     {
+        // Layout editor opened: a tip left open from play would sit over the tiles being arranged → close it, once.
+        bool editing = _services.Windows.IsLayoutEditing;
+        if (editing != _tipWasEditing)
+        {
+            _tipWasEditing = editing;
+            if (editing && _tipOpen) CloseTooltip();
+        }
         if (!_tipOpen || _tipPlaced) return;
         if (_tooltip.IsShown) { _tooltip.SetRect(_tipRect); _tipPlaced = true; }
     }
@@ -85,9 +92,14 @@ public sealed partial class Plugin
         _tooltip.SetVisible(true);
     }
 
-    // Called when a bar tile is left-clicked.
+    private bool _tipWasEditing;
+
+    // Called when a bar tile (or a placed tile) is left-clicked. In the layout editor a tile is being DRAGGED, and the
+    // press-release of a drag still reaches the tile's Selectable as a click (user report 2026-11-13): ignore it there.
+    // The Selectable itself stays — the framework's edit-mode drag owns the move, the click is just a no-op.
     internal void OnTileClick(int idx)
     {
+        if (_services.Windows.IsLayoutEditing) return;
         if (!SlotValid(idx) || (_tipShownFor == idx && _tooltip.IsShown))
         {
             CloseTooltip();
