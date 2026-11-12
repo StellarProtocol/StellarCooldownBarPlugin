@@ -37,6 +37,10 @@ public sealed partial class Plugin
         public int      Slot;                     // 0..MaxPlaced-1: sample index + default column position
         public IWindowControl? Win;
         public int      TileIdx = -1;             // live _tiles index this refresh, -1 = not active
+        // Default-grid bookkeeping (Plugin.Placed.Window.cs): the grid size its default spot was laid out for, and when
+        // a pending grid check may run (after the saved rect has been applied).
+        public int      GridPct;
+        public long     GridCheckAt;
         // Edit-mode icon fade (Plugin.Placed.Fade.cs).
         public UnityEngine.RectTransform? Root;
         public bool     FadeApplied;
@@ -235,19 +239,35 @@ public sealed partial class Plugin
     private const int PlacedRegisterPerTick = 2;
     private bool _placedPumpDue;
 
+    // The same pump moves unmoved tiles onto a new default grid (Plugin.Placed.Window.cs), within the same budget.
     private void PumpPlacedWindows()
     {
         if (!_placedPumpDue) return;
+        RegridPlaced();   // a new effect may carry a larger size override → grid first, so it registers on the right spot
+        long now = Environment.TickCount64;
         int done = 0;
+        bool waiting = false;
         for (int s = 0; s < MaxPlaced; s++)
         {
             var p = _placed[s];
-            if (p == null || p.Win != null) continue;
-            if (done == PlacedRegisterPerTick) return;   // more left: next tick
-            p.Win = RegisterPlacedWindow(p);    // Plugin.Placed.Window.cs
-            done++;
+            if (p == null) continue;
+            if (p.Win == null)
+            {
+                if (done == PlacedRegisterPerTick) return;   // more left: next tick
+                p.Win = RegisterPlacedWindow(p);    // Plugin.Placed.Window.cs
+                // Its saved rect (if any) may be from the old fixed 100 % grid → check it against that once mounted.
+                p.GridPct = LegacyGridPct;
+                p.GridCheckAt = now + GridSettleMs;
+                waiting |= p.GridPct != _placedGridPct;
+                done++;
+            }
+            else if (p.GridPct != _placedGridPct)
+            {
+                if (done == PlacedRegisterPerTick) return;
+                if (MoveToGrid(p, now)) done++; else waiting = true;
+            }
         }
-        _placedPumpDue = false;
+        _placedPumpDue = waiting;
     }
 
     private void RemovePlaced(int slot)
@@ -271,6 +291,7 @@ public sealed partial class Plugin
         _notPlacedKeys.Clear();
         _placedSyncVer = -1;
         _placedPumpDue = false;
+        _placedGridPct = 0;
     }
 
     // A frozen sample for the layout editor: 12 s left of 20 (rate 0, so it never ticks), no chip. Icon source like the
@@ -295,6 +316,7 @@ public sealed partial class Plugin
         _cfg.Set("placed.sizeKeys", keys);
         _cfg.Set("placed.sizeVals", vals);
         _cfg.Save();
+        RegridPlaced();   // Plugin.Placed.Window.cs — a bigger tile may need a wider default grid
     }
 
     private void SetPlacedSize(int pct)
@@ -304,5 +326,6 @@ public sealed partial class Plugin
         _placedSize = pct;
         _cfg.Set("placed.size", pct);
         _cfg.Save();
+        RegridPlaced();   // Plugin.Placed.Window.cs — unmoved tiles follow the new default grid
     }
 }

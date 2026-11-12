@@ -41,7 +41,7 @@ public sealed partial class Plugin
             new WindowSpec(
                 Id:          PlacedWindowId(p),
                 Title:       name,
-                DefaultRect: PlacedDefaultRect(p.Slot),
+                DefaultRect: PlacedDefaultRect(p.Slot, _placedGridPct),
                 Category:    WindowCategory.HUD,
                 Style:       WindowPanelStyle.Borderless)
             {
@@ -52,16 +52,63 @@ public sealed partial class Plugin
             BuildPlacedRoot(p)));
     }
 
-    // New placed effects first appear in a column block right of the screen centre (6 per column, then the next column)
-    // until the user moves them. Canvas units; 1920 × 1080 until the canvas reports its size.
-    private WindowRect PlacedDefaultRect(int slot)
+    // New placed effects first appear in a column block right of the screen centre (up to 6 per column, then the next
+    // column) until the user moves them. The cells are spaced for `pct` — the GRID size (PlacedGridPct: the largest size
+    // any placed tile uses), so tiles never overlap at 125–200 % (at 150 % the old fixed 100 % pitch stacked them, in game
+    // 2026-11-13). Fewer rows per column when a column wouldn't fit the canvas height. At 100 % this is exactly the old
+    // grid (100 × 113 cells, 6 rows), which is what LegacyGridPct relies on. Canvas units; 1920 × 1080 until the canvas
+    // reports its size.
+    private WindowRect PlacedDefaultRect(int slot, int pct)
     {
         var fw = _services.Framework;
         float cw = fw.CanvasWidth > 1f ? fw.CanvasWidth : 1920f, ch = fw.CanvasHeight > 1f ? fw.CanvasHeight : 1080f;
-        float w = PlacedTagW + ChromePad * 2f;                                      // 100 at 100 %
-        float h = ChromePad * 2f + PlacedTagH + PlacedTagGap + TileH;              // 113 at 100 %
-        int col = slot / 6, row = slot % 6;
-        return new WindowRect(cw / 2f + 140f + col * (w + 4f), ch / 2f - 3f * (h + 4f) + row * (h + 4f), w, 0f);
+        var g = PlacedGeoms[Math.Max(0, Array.IndexOf(PlacedSizes, pct))];
+        float tileH = 2f * g.Pad + g.Icon + 2f * g.ColGap + g.BarH + g.FooterH;   // the T1 column (70 at 100 %)
+        float w = MathF.Max(PlacedTagW, g.W) + ChromePad * 2f;                    // 100 at 100 %
+        float h = ChromePad * 2f + PlacedTagH + PlacedTagGap + tileH;             // 113 at 100 %
+        int perCol = Math.Clamp((int)((ch - 80f) / (h + 4f)), 1, 6);
+        int col = slot / perCol, row = slot % perCol;
+        return new WindowRect(cw / 2f + 140f + col * (w + 4f), ch / 2f - perCol * (h + 4f) / 2f + row * (h + 4f), w, 0f);
+    }
+
+    // ── keeping unmoved tiles on the grid when the grid size changes ──────────────────────────────────────────────
+    // The framework persists every window's first settled rect, so "has a saved position" can't tell a user-placed tile
+    // from one still sitting on its default spot. A tile counts as UNMOVED when its rect is still the default rect of
+    // the grid it was laid out for (PlacedEffect.GridPct); only those follow a grid change. Windows from before the
+    // grid was size-aware sit on the 100 % grid (LegacyGridPct), so a newly registered window is checked against that
+    // once its saved rect has been applied (GridSettleMs after registering).
+    private const int  LegacyGridPct = 100;
+    private const long GridSettleMs  = 500;
+    private int _placedGridPct;   // the grid the registered windows are laid out for (0 = none registered yet)
+
+    private int PlacedGridPct()
+    {
+        int m = _placedSize;
+        for (int s = 0; s < MaxPlaced; s++) if (_placed[s] is { } p) m = Math.Max(m, EffectiveSize(p));
+        return m;
+    }
+
+    // After a size change or a new effect: a new grid → the pump re-checks every registered window (spread over ticks).
+    private void RegridPlaced()
+    {
+        int grid = PlacedGridPct();
+        if (grid == _placedGridPct) return;
+        _placedGridPct = grid;
+        _placedPumpDue = true;
+    }
+
+    // Pump step for one registered window whose GridPct differs from the current grid. False = not yet (its saved rect
+    // may not be applied right after registering) → retry next tick.
+    private bool MoveToGrid(PlacedEffect p, long now)
+    {
+        if (now < p.GridCheckAt) return false;
+        var was = PlacedDefaultRect(p.Slot, p.GridPct);
+        p.GridPct = _placedGridPct;
+        var cur = p.Win!.Rect;
+        if (Math.Abs(cur.X - was.X) >= 1f || Math.Abs(cur.Y - was.Y) >= 1f) return true;   // the user moved it: keep
+        var to = PlacedDefaultRect(p.Slot, _placedGridPct);
+        p.Win.SetRect(new WindowRect(to.X, to.Y, cur.Width, cur.Height));   // persists (one config write)
+        return true;
     }
 
     private HudElement BuildPlacedRoot(PlacedEffect p)
