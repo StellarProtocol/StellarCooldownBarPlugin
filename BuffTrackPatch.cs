@@ -318,7 +318,9 @@ internal static partial class BuffTrackPatch
 
     private static void PostfixOnAddBuff(object __instance, object __0, bool __1)
     {
+        using var _perf = CdPerf.Hook();   // [CdPerf] postfix bucket — default struct unless the probe is on
         if (!Active) return;
+        CdPerf.HookFull();
         try
         {
             if (!IsLocalPlayer(GetHostEntityUuid(__instance))) return;
@@ -366,7 +368,9 @@ internal static partial class BuffTrackPatch
 
     private static void PostfixClientAddBuff(object __instance, object __0, int __1, int __2, float __3, object __result)
     {
+        using var _perf = CdPerf.Hook();   // [CdPerf] postfix bucket — default struct unless the probe is on
         if (!Active) return;
+        CdPerf.HookFull();
         try
         {
             if (!IsLocalPlayer(GetHostEntityUuid(__instance))) return;

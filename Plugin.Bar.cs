@@ -10,6 +10,7 @@ namespace Stellar.CooldownBar;
 // Active-only: a slot shows only while idx < _tileCount. Each active slot is a bespoke CooldownTileElement
 // (icon + accent outline + foot fill-bar + seconds + ★/charge badges) — cooldown = cyan, debuff = red.
 // Imagine-lockout debuffs render the source Imagine's artwork + a ★ badge.
+// Every Func is wrapped in P(...) = CdPerf.Fn: the [CdPerf] "funcs" bucket when the probe is on, the bare lambda when off.
 public sealed partial class Plugin
 {
     private static readonly ColorRgba CooldownCol = new(0.35f, 0.78f, 1.00f, 1f);   // cyan
@@ -26,12 +27,12 @@ public sealed partial class Plugin
     {
         var gear = new CellElement(
             new SelectableElement(
-                new ImageElement(() => GearPng(), 15, 15),
+                new ImageElement(P(() => GearPng()), 15, 15),
                 OnClick: () => _settings.SetVisible(!_settings.IsShown)),
             Width: 26f);
         var header = new RowElement(new HudElement[]
         {
-            new TextElement(() => _loc.T("cd.barTitle"), () => MutedCol, Shadow: true),
+            new TextElement(P(() => _loc.T("cd.barTitle")), P<ColorRgba?>(() => MutedCol), Shadow: true),
             new SpacerElement(),
             gear,
         });
@@ -42,20 +43,20 @@ public sealed partial class Plugin
         {
             int c = i;
             row1[i] = new ConditionalElement(
-                () => c < _tilesPerRow && c < _tileCount,
+                P(() => c < _tilesPerRow && c < _tileCount),
                 new CooldownTileElement(
-                    Icon:        () => TileIcon(c),
-                    Uv:          () => _uv[c],
-                    Fill01:      () => c < _tileCount ? _tiles[c].Fill01 : 0f,
-                    Seconds:     () => SecondsLabel(c),
-                    Accent:      () => AccentColor(c),
-                    IsImagine:   () => false,
-                    ChargeCount: () => c < _tileCount ? _tiles[c].ChargeCount : 0)
-                { OnClick = () => OnTileClick(c), FallbackLabel = () => Abbrev(TileName(c)) });
+                    Icon:        P(() => TileIcon(c)),
+                    Uv:          P(() => _uv[c]),
+                    Fill01:      P(() => c < _tileCount ? _tiles[c].Fill01 : 0f),
+                    Seconds:     P(() => SecondsLabel(c)),
+                    Accent:      P(() => AccentColor(c)),
+                    IsImagine:   P(() => false),
+                    ChargeCount: P(() => c < _tileCount ? _tiles[c].ChargeCount : 0))
+                { OnClick = () => OnTileClick(c), FallbackLabel = P(() => Abbrev(TileName(c))) });
         }
         row1[MaxTilesPerRow] = new ConditionalElement(
-            () => _rowsVisible < 2 && _totalTileCount > _tileCount,
-            new TextElement(() => $"+{_totalTileCount - _tileCount}", () => MutedCol, Shadow: true));
+            P(() => _rowsVisible < 2 && _totalTileCount > _tileCount),
+            new TextElement(P(() => $"+{_totalTileCount - _tileCount}"), P<ColorRgba?>(() => MutedCol), Shadow: true));
 
         // Row 2: columns 0..MaxTilesPerRow-1 → tiles _tilesPerRow.._tilesPerRow+col
         var row2 = new HudElement[MaxTilesPerRow + 1];
@@ -63,20 +64,20 @@ public sealed partial class Plugin
         {
             int c = i;
             row2[i] = new ConditionalElement(
-                () => c < _tilesPerRow && _tilesPerRow + c < _tileCount,
+                P(() => c < _tilesPerRow && _tilesPerRow + c < _tileCount),
                 new CooldownTileElement(
-                    Icon:        () => TileIcon(_tilesPerRow + c),
-                    Uv:          () => _uv[_tilesPerRow + c],
-                    Fill01:      () => { int ti = _tilesPerRow + c; return ti < _tileCount ? _tiles[ti].Fill01 : 0f; },
-                    Seconds:     () => SecondsLabel(_tilesPerRow + c),
-                    Accent:      () => AccentColor(_tilesPerRow + c),
-                    IsImagine:   () => false,
-                    ChargeCount: () => { int ti = _tilesPerRow + c; return ti < _tileCount ? _tiles[ti].ChargeCount : 0; })
-                { OnClick = () => OnTileClick(_tilesPerRow + c), FallbackLabel = () => Abbrev(TileName(_tilesPerRow + c)) });
+                    Icon:        P(() => TileIcon(_tilesPerRow + c)),
+                    Uv:          P(() => _uv[_tilesPerRow + c]),
+                    Fill01:      P(() => { int ti = _tilesPerRow + c; return ti < _tileCount ? _tiles[ti].Fill01 : 0f; }),
+                    Seconds:     P(() => SecondsLabel(_tilesPerRow + c)),
+                    Accent:      P(() => AccentColor(_tilesPerRow + c)),
+                    IsImagine:   P(() => false),
+                    ChargeCount: P(() => { int ti = _tilesPerRow + c; return ti < _tileCount ? _tiles[ti].ChargeCount : 0; }))
+                { OnClick = () => OnTileClick(_tilesPerRow + c), FallbackLabel = P(() => Abbrev(TileName(_tilesPerRow + c))) });
         }
         row2[MaxTilesPerRow] = new ConditionalElement(
-            () => _rowsVisible == 2 && _totalTileCount > _tileCount,
-            new TextElement(() => $"+{_totalTileCount - _tileCount}", () => MutedCol, Shadow: true));
+            P(() => _rowsVisible == 2 && _totalTileCount > _tileCount),
+            new TextElement(P(() => $"+{_totalTileCount - _tileCount}"), P<ColorRgba?>(() => MutedCol), Shadow: true));
 
         // Row 3: columns 0..MaxTilesPerRow-1 → tiles 2*_tilesPerRow..2*_tilesPerRow+col
         var row3 = new HudElement[MaxTilesPerRow + 1];
@@ -84,31 +85,31 @@ public sealed partial class Plugin
         {
             int c = i;
             row3[i] = new ConditionalElement(
-                () => c < _tilesPerRow && _tilesPerRow * 2 + c < _tileCount,
+                P(() => c < _tilesPerRow && _tilesPerRow * 2 + c < _tileCount),
                 new CooldownTileElement(
-                    Icon:        () => TileIcon(_tilesPerRow * 2 + c),
-                    Uv:          () => _uv[_tilesPerRow * 2 + c],
-                    Fill01:      () => { int ti = _tilesPerRow * 2 + c; return ti < _tileCount ? _tiles[ti].Fill01 : 0f; },
-                    Seconds:     () => SecondsLabel(_tilesPerRow * 2 + c),
-                    Accent:      () => AccentColor(_tilesPerRow * 2 + c),
-                    IsImagine:   () => false,
-                    ChargeCount: () => { int ti = _tilesPerRow * 2 + c; return ti < _tileCount ? _tiles[ti].ChargeCount : 0; })
-                { OnClick = () => OnTileClick(_tilesPerRow * 2 + c), FallbackLabel = () => Abbrev(TileName(_tilesPerRow * 2 + c)) });
+                    Icon:        P(() => TileIcon(_tilesPerRow * 2 + c)),
+                    Uv:          P(() => _uv[_tilesPerRow * 2 + c]),
+                    Fill01:      P(() => { int ti = _tilesPerRow * 2 + c; return ti < _tileCount ? _tiles[ti].Fill01 : 0f; }),
+                    Seconds:     P(() => SecondsLabel(_tilesPerRow * 2 + c)),
+                    Accent:      P(() => AccentColor(_tilesPerRow * 2 + c)),
+                    IsImagine:   P(() => false),
+                    ChargeCount: P(() => { int ti = _tilesPerRow * 2 + c; return ti < _tileCount ? _tiles[ti].ChargeCount : 0; }))
+                { OnClick = () => OnTileClick(_tilesPerRow * 2 + c), FallbackLabel = P(() => Abbrev(TileName(_tilesPerRow * 2 + c))) });
         }
         row3[MaxTilesPerRow] = new ConditionalElement(
-            () => _rowsVisible >= 3 && _totalTileCount > _tileCount,
-            new TextElement(() => $"+{_totalTileCount - _tileCount}", () => MutedCol, Shadow: true));
+            P(() => _rowsVisible >= 3 && _totalTileCount > _tileCount),
+            new TextElement(P(() => $"+{_totalTileCount - _tileCount}"), P<ColorRgba?>(() => MutedCol), Shadow: true));
 
         var hint = new ConditionalElement(
-            () => _tileCount == 0,
-            new TextElement(() => _loc.T("cd.empty"), () => MutedCol, Shadow: true));
+            P(() => _tileCount == 0),
+            new TextElement(P(() => _loc.T("cd.empty")), P<ColorRgba?>(() => MutedCol), Shadow: true));
 
         var tileRows = new ColumnElement(new HudElement[]
         {
             new RowElement(row1, Gap: 6f),
-            new ConditionalElement(() => _rowsVisible >= 2 && _tileCount > _tilesPerRow,
+            new ConditionalElement(P(() => _rowsVisible >= 2 && _tileCount > _tilesPerRow),
                 new RowElement(row2, Gap: 6f)),
-            new ConditionalElement(() => _rowsVisible >= 3 && _tileCount > _tilesPerRow * 2,
+            new ConditionalElement(P(() => _rowsVisible >= 3 && _tileCount > _tilesPerRow * 2),
                 new RowElement(row3, Gap: 6f)),
         }, Gap: 6f);
 

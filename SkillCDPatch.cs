@@ -137,7 +137,9 @@ internal static class SkillCDPatch
 
     private static void PostfixOnCDBegin(object __instance, object __0)
     {
+        using var _perf = CdPerf.Hook();   // [CdPerf] postfix bucket — default struct unless the probe is on
         if (!Active) return;
+        CdPerf.HookFull();
         try
         {
             _miGetSkillId ??= __instance.GetType().GetMethod("get_SkillId", BindingFlags.Public | BindingFlags.Instance);
@@ -176,7 +178,9 @@ internal static class SkillCDPatch
 
     private static void PostfixOnSkillCDLayerChanged(object __instance, object __0)
     {
+        using var _perf = CdPerf.Hook();   // [CdPerf] postfix bucket — default struct unless the probe is on
         if (!Active) return;
+        CdPerf.HookFull();
         try
         {
             _miGetSkillId ??= __instance.GetType().GetMethod("get_SkillId", BindingFlags.Public | BindingFlags.Instance);

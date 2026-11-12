@@ -43,6 +43,7 @@ public sealed partial class Plugin : IStellarPlugin
         _services = services;
         _loc = services.Localization;
         _cfg = _services.Config.GetSection("cooldownbar");
+        InitPerf();   // Plugin.Perf.cs — diagnostics-gated [CdPerf] probe; must precede BuildRoot
         _bgOpacity = _cfg.Get("bar.bg_opacity", 0f);
         _showHidden = _cfg.Get("bar.show_hidden", false);
         BuffTrackPatch.ShowHidden = _showHidden;               // full-vs-showed buff list source for the bar
@@ -69,7 +70,8 @@ public sealed partial class Plugin : IStellarPlugin
               // In-world HUD: draw only in the World phase, and hide behind blocking overlays (old AutoHideBehindGameMenus)
               // and the line-selector / any menu.
               ShouldRender = () => _services.ClientState.Phase == GamePhase.World
-                                   && (_services.ClientState.UiState & (GameUIState.Blocking | GameUIState.AnyMenu)) == 0,
+                                   && (_services.ClientState.UiState & (GameUIState.Blocking | GameUIState.AnyMenu)) == 0
+                                   && !_perfOff,   // [CdPerf] in-session off control (always false unless probe on)
               Resizable = true, MinWidth = 150f, MaxWidth = 1600f, MinHeight = 130f, MaxHeight = 270f,
               BackgroundOpacity = () => _bgOpacity },
             BuildRoot()));
@@ -118,23 +120,27 @@ public sealed partial class Plugin : IStellarPlugin
 
     private void OnUpdate(float deltaTime)
     {
+        var perfUpdate = CdPerf.Begin();   // Plugin.Perf.cs — default (no Stopwatch read) unless the probe is on
         // Only read buff/CD state when the bar is actually visible, and at ~60Hz — not every frame.
         // RefreshActiveBuffs rebuilds collections + walks the buff lists via reflection; running it every
         // frame (even while the bar is hidden) was a steady combat-time GC source. The window's Funcs still
         // draw every frame from the last-built _tiles, so the bar stays smooth; only the data refresh throttles.
-        if (_bar.IsShown)
+        if (_bar.IsShown && !_perfOff)
         {
             _rebuildAccum += deltaTime;
             if (_rebuildAccum >= RebuildIntervalS)
             {
                 _rebuildAccum = 0f;
+                var perfRefresh = CdPerf.Begin();
                 BuffTrackPatch.MarkDemand();   // keep the per-entity buff/CD postfixes awake only while refreshing
                 SkillCDPatch.MarkDemand();
                 RebuildSnapshot();             // Plugin.Seen.cs
+                CdPerf.End(CdPerf.Refresh, perfRefresh);
             }
         }
         TickTooltipPlace();       // Plugin.Tooltip.cs — re-assert cursor rect after destroy-on-hide remount
         LogSnapshotDiag(deltaTime);   // Plugin.Diagnostics.cs — gated on STELLAR_DIAGNOSTICS
+        if (CdPerf.On) PerfTick(deltaTime, perfUpdate);   // Plugin.Perf.cs
     }
 
     private static byte[]? LoadIconPng()
