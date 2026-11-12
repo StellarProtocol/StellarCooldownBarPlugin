@@ -196,7 +196,7 @@ public sealed partial class Plugin
             var bGroups = new BuffGroupAccumulator();
             // Show-hidden uses the resolved label (game Name for real buffs, NameDesign for hidden ones) BOTH as the
             // display name and the grouping key, so distinct hidden buffs don't collapse into one placeholder blob.
-            if (_showHidden) TranslatedBuffText.EnsureLoaded(_services.Log.Info);
+            if (_showHidden) TranslatedBuffText.EnsureLoaded();   // no-op once started; labels fall back until it lands
             PropertyInfo? piKvp = null, piId = null, piName = null, piIcon = null, piType = null, piDesc = null;
 
             foreach (var item in SettingsReflectEnumerate(values))

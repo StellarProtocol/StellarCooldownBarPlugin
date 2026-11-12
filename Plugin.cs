@@ -47,7 +47,7 @@ public sealed partial class Plugin : IStellarPlugin
         _bgOpacity = _cfg.Get("bar.bg_opacity", 0f);
         _showHidden = _cfg.Get("bar.show_hidden", false);
         BuffTrackPatch.ShowHidden = _showHidden;               // full-vs-showed buff list source for the bar
-        TranslatedBuffText.EnsureLoaded(_services.Log.Info);   // English NameDesign labels (one-time lazy load)
+        TranslatedBuffText.EnsureLoaded();   // English NameDesign labels — parsed on a background task; OnUpdate polls ConsumeLoaded
         _selection = CooldownBarSelection.Load(_cfg);
         _attr = new DebuffAttribution(
             buffSkillId:    id => _services.GameData.Combat.GetBuff(id)?.SkillId ?? 0,
@@ -146,9 +146,24 @@ public sealed partial class Plugin : IStellarPlugin
                 CdPerf.End(CdPerf.Refresh, perfRefresh);
             }
         }
+        if (TranslatedBuffText.ConsumeLoaded(out var loadMsg)) OnTranslatedTextLoaded(loadMsg);   // one int read/frame
         TickTooltipPlace();       // Plugin.Tooltip.cs — re-assert cursor rect after destroy-on-hide remount
         LogSnapshotDiag(deltaTime);   // Plugin.Diagnostics.cs — gated on STELLAR_DIAGNOSTICS
         if (CdPerf.On) PerfTick(deltaTime, perfUpdate);   // Plugin.Perf.cs
+    }
+
+    // Main thread, once, when the background BuffTable.json parse lands (TranslatedBuffText). Labels resolved during the
+    // load window used the game-name fallback: drop the bar's cached badges, and if the Show-hidden picker tables were
+    // already built from fallback labels, rebuild them (now if the settings window is open, else on next access).
+    private void OnTranslatedTextLoaded(string msg)
+    {
+        _services.Log.Info(msg);
+        ClearBarCaches();   // Plugin.Bar.Cache.cs
+        if (_showHidden && _buffTabLoaded)
+        {
+            _buffTabLoaded = false;
+            if (_settings.IsShown) EnsureBuffTabLoaded();   // re-applies the active debuff/buff search filters
+        }
     }
 
     private static byte[]? LoadIconPng()
