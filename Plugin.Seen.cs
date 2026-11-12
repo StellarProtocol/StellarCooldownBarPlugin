@@ -37,6 +37,9 @@ public sealed partial class Plugin
     private int _arrivalSeq;
     private TileComparer? _tileComparer;
 
+    // A _tiles index a tile Func may read: a live tile of the current snapshot.
+    private bool SlotValid(int idx) => (uint)idx < (uint)_tileCount;
+
     private int _tilesPerRow;     // tiles that fit in current width (capped at MaxTiles/MaxRows)
     private int _rowsVisible;     // rows that fit in current height (1 or MaxRows)
     private int _totalTileCount;  // raw active count before display cap (for overflow indicator)

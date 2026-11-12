@@ -26,7 +26,7 @@ public sealed partial class Plugin
     // CdTimeFormat.cs owns the format (unit-tested) and the integer key that drives it.
     private string SecondsLabel(int idx)
     {
-        if (idx >= _tileCount) return "";
+        if (!SlotValid(idx)) return "";
         var t = _tiles[idx];
         // Truncate to whole ms like the old (int)(rem * 1000) snapshot so the formatted value is unchanged.
         float secs = t.Permanent ? 0f : (int)(t.RemainAt(Environment.TickCount64) * 1000f) / 1000f;
@@ -53,7 +53,7 @@ public sealed partial class Plugin
 
     private string TileAbbrev(int idx)
     {
-        if (idx >= _tileCount) return "";
+        if (!SlotValid(idx)) return "";
         var t = _tiles[idx];
         var key = (t.Kind, t.Id);
         if (_abbrevCache.TryGetValue(key, out var s)) return s;
@@ -75,7 +75,7 @@ public sealed partial class Plugin
 
     private object? TileIcon(int idx)
     {
-        if (idx >= _tileCount) { _uv[idx] = new UvRect(0f, 0f, 1f, 1f); return null; }
+        if (!SlotValid(idx)) { _uv[idx] = new UvRect(0f, 0f, 1f, 1f); return null; }
         var t = _tiles[idx];
         long now = Environment.TickCount64;
         var key = (t.Kind, t.Id, t.IconSkillId);

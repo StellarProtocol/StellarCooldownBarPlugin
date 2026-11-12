@@ -56,7 +56,7 @@ public sealed partial class Plugin
             int c = i;
             cells[i] = new ConditionalElement(
                 P(() => c < _tilesPerRow && r * _tilesPerRow + c < _tileCount),
-                BuildTile(() => r * _tilesPerRow + c));   // Plugin.Bar.Tile.cs
+                BuildTile(() => r * _tilesPerRow + c, BarGeom));   // Plugin.Bar.Tile.cs
         }
         cells[MaxTilesPerRow] = new ConditionalElement(
             P(() => _rowsVisible == r + 1 && _totalTileCount > _tileCount),
@@ -116,7 +116,7 @@ public sealed partial class Plugin
 
     private ColorRgba KindColor(int idx)
     {
-        if (idx >= _tileCount) return CooldownCol;
+        if (!SlotValid(idx)) return CooldownCol;
         return _tiles[idx].Kind switch
         {
             TileKind.Debuff => DebuffCol,
@@ -129,7 +129,7 @@ public sealed partial class Plugin
     // chose smooth fills without pixel rounding (2026-11-12, "smooth, no item 8").
     private float TileFill(int idx)
     {
-        if (idx >= _tileCount) return 0f;
+        if (!SlotValid(idx)) return 0f;
         return _tiles[idx].FillAt(Environment.TickCount64);
     }
 
@@ -139,7 +139,7 @@ public sealed partial class Plugin
     private string TileName(int idx, out bool known)
     {
         known = false;
-        if (idx >= _tileCount) return "";
+        if (!SlotValid(idx)) return "";
         var t = _tiles[idx];
         if (t.Kind == TileKind.Cooldown)
         {

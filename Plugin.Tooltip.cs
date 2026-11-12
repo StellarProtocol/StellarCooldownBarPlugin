@@ -88,7 +88,7 @@ public sealed partial class Plugin
     // Called when a bar tile is left-clicked.
     internal void OnTileClick(int idx)
     {
-        if (idx >= _tileCount || (_tipShownFor == idx && _tooltip.IsShown))
+        if (!SlotValid(idx) || (_tipShownFor == idx && _tooltip.IsShown))
         {
             CloseTooltip();
             return;
