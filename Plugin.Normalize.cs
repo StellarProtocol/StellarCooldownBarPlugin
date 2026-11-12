@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Stellar.Abstractions.Domain;
 
 namespace Stellar.CooldownBar;
@@ -14,7 +15,9 @@ namespace Stellar.CooldownBar;
 // a single main-thread hitch, retried every 2 s while the game tables aren't ready.
 public sealed partial class Plugin
 {
-    private const int NormalizeVersion = 1;
+    // 2 = list-membership rule (SelectionNormalizer.cs). v1 asked the game whether an id had a named row and so kept
+    // sub-ids like 392301; installs already marked 1 run the conversion once more under the new rule.
+    private const int NormalizeVersion = 2;
     private const long EagerTableRetryMs = 2000;
 
     private bool _normDone;            // this session's conversion ran
@@ -43,20 +46,17 @@ public sealed partial class Plugin
     private void TryNormalizeSelection()
     {
         if (_normDone || !_stBaseLoaded || !_buffTabLoaded) return;
-        var combat = _services.GameData.Combat;
-        // Readiness: the game-data lookups the mapping uses must resolve a row the picker load just listed. Until they
-        // do, a "no row" answer would mean "not ready", not "stale" — so wait (never drop on an unready table).
-        if (_stBaseIds.Length == 0 || combat.GetSkill(_stBaseIds[0]) == null) return;
-        int anyBuff = _dtCount > 0 ? _dtIds[0] : _btCount > 0 ? _btIds[0] : 0;
-        if (anyBuff == 0 || combat.GetBuff(anyBuff) == null) return;
+        // Readiness: the lists themselves. A drop means "the list doesn't show it", so both lists must be built (an empty
+        // list = not loaded yet, never "everything is stale").
+        if (_stCount == 0 || _dtCount + _btCount == 0) return;
         _normDone = true;
 
         int converted = 0, dropped = 0;
-        Func<int, bool> skillRow = id => combat.GetSkill(id) != null;
-        Func<int, bool> buffRow  = id => combat.GetBuff(id) != null;
-        var skills  = SelectionNormalizer.Skills(_selection.SkillIds, ResolveNamedBaseSkill, skillRow, ref converted, ref dropped);
-        var debuffs = SelectionNormalizer.Groups(_selection.DebuffIds, _dtMembers, _dtCount, buffRow, ref converted, ref dropped);
-        var buffs   = SelectionNormalizer.Groups(_selection.BuffIds,   _btMembers, _btCount, buffRow, ref converted, ref dropped);
+        var listed = new HashSet<int>();   // what the Skills list shows (base table + bar-seen); one-shot, so it may allocate
+        for (int i = 0; i < _stCount; i++) listed.Add(_stIds[i]);
+        var skills  = SelectionNormalizer.Skills(_selection.SkillIds, listed, ref converted, ref dropped);
+        var debuffs = SelectionNormalizer.Groups(_selection.DebuffIds, _dtMembers, _dtCount, ref converted, ref dropped);
+        var buffs   = SelectionNormalizer.Groups(_selection.BuffIds,   _btMembers, _btCount, ref converted, ref dropped);
 
         bool changed = !skills.SetEquals(_selection.SkillIds) || !debuffs.SetEquals(_selection.DebuffIds)
                        || !buffs.SetEquals(_selection.BuffIds);
