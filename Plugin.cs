@@ -114,6 +114,7 @@ public sealed partial class Plugin : IStellarPlugin
         _tooltip.Remove();
         _settings.Remove();
         _bar.Remove();
+        ClearBarCaches();   // Plugin.Bar.Cache.cs
     }
 
     private float _rebuildAccum;

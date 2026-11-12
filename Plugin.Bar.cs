@@ -52,11 +52,11 @@ public sealed partial class Plugin
                     Accent:      P(() => AccentColor(c)),
                     IsImagine:   P(() => false),
                     ChargeCount: P(() => c < _tileCount ? _tiles[c].ChargeCount : 0))
-                { OnClick = () => OnTileClick(c), FallbackLabel = P(() => Abbrev(TileName(c))) });
+                { OnClick = () => OnTileClick(c), FallbackLabel = P(() => TileAbbrev(c)) });
         }
         row1[MaxTilesPerRow] = new ConditionalElement(
             P(() => _rowsVisible < 2 && _totalTileCount > _tileCount),
-            new TextElement(P(() => $"+{_totalTileCount - _tileCount}"), P<ColorRgba?>(() => MutedCol), Shadow: true));
+            new TextElement(P(OverflowLabel), P<ColorRgba?>(() => MutedCol), Shadow: true));
 
         // Row 2: columns 0..MaxTilesPerRow-1 → tiles _tilesPerRow.._tilesPerRow+col
         var row2 = new HudElement[MaxTilesPerRow + 1];
@@ -73,11 +73,11 @@ public sealed partial class Plugin
                     Accent:      P(() => AccentColor(_tilesPerRow + c)),
                     IsImagine:   P(() => false),
                     ChargeCount: P(() => { int ti = _tilesPerRow + c; return ti < _tileCount ? _tiles[ti].ChargeCount : 0; }))
-                { OnClick = () => OnTileClick(_tilesPerRow + c), FallbackLabel = P(() => Abbrev(TileName(_tilesPerRow + c))) });
+                { OnClick = () => OnTileClick(_tilesPerRow + c), FallbackLabel = P(() => TileAbbrev(_tilesPerRow + c)) });
         }
         row2[MaxTilesPerRow] = new ConditionalElement(
             P(() => _rowsVisible == 2 && _totalTileCount > _tileCount),
-            new TextElement(P(() => $"+{_totalTileCount - _tileCount}"), P<ColorRgba?>(() => MutedCol), Shadow: true));
+            new TextElement(P(OverflowLabel), P<ColorRgba?>(() => MutedCol), Shadow: true));
 
         // Row 3: columns 0..MaxTilesPerRow-1 → tiles 2*_tilesPerRow..2*_tilesPerRow+col
         var row3 = new HudElement[MaxTilesPerRow + 1];
@@ -94,11 +94,11 @@ public sealed partial class Plugin
                     Accent:      P(() => AccentColor(_tilesPerRow * 2 + c)),
                     IsImagine:   P(() => false),
                     ChargeCount: P(() => { int ti = _tilesPerRow * 2 + c; return ti < _tileCount ? _tiles[ti].ChargeCount : 0; }))
-                { OnClick = () => OnTileClick(_tilesPerRow * 2 + c), FallbackLabel = P(() => Abbrev(TileName(_tilesPerRow * 2 + c))) });
+                { OnClick = () => OnTileClick(_tilesPerRow * 2 + c), FallbackLabel = P(() => TileAbbrev(_tilesPerRow * 2 + c)) });
         }
         row3[MaxTilesPerRow] = new ConditionalElement(
             P(() => _rowsVisible >= 3 && _totalTileCount > _tileCount),
-            new TextElement(P(() => $"+{_totalTileCount - _tileCount}"), P<ColorRgba?>(() => MutedCol), Shadow: true));
+            new TextElement(P(OverflowLabel), P<ColorRgba?>(() => MutedCol), Shadow: true));
 
         var hint = new ConditionalElement(
             P(() => _tileCount == 0),
@@ -133,30 +133,6 @@ public sealed partial class Plugin
         };
     }
 
-    private object? TileIcon(int idx)
-    {
-        if (idx >= _tileCount) { _uv[idx] = new UvRect(0f, 0f, 1f, 1f); return null; }
-        var t = _tiles[idx];
-        if (t.Kind == TileKind.Cooldown)
-            return _services.GameAssets.LoadImagineIcon(t.IconSkillId, out _uv[idx])
-                ?? _services.GameAssets.LoadSkillIcon(t.Id, out _uv[idx]);
-        // Buff/debuff: source skill's icon when known, then a curated EffectOverride icon (for icon-less buffs with
-        // no source skill — borrows an imagine/skill icon), falling back to the buff/debuff's own icon.
-        if (t.IconSkillId > 0)
-        {
-            var bySkill = _services.GameAssets.LoadImagineIcon(t.IconSkillId, out _uv[idx])
-                       ?? _services.GameAssets.LoadSkillIcon(t.IconSkillId, out _uv[idx]);
-            if (bySkill != null) return bySkill;
-        }
-        if (TranslatedBuffText.EffectOverrides.TryGetValue(t.Id, out var ov) && ov.IconSkill > 0)
-        {
-            var byOverride = _services.GameAssets.LoadImagineIcon(ov.IconSkill, out _uv[idx])
-                          ?? _services.GameAssets.LoadSkillIcon(ov.IconSkill, out _uv[idx]);
-            if (byOverride != null) return byOverride;
-        }
-        return _services.GameAssets.LoadBuffIcon(t.Id, out _uv[idx]);
-    }
-
     // Per-frame fill, extrapolated from the tile's last 10 Hz sample (TrackedTile.FillAt). Quantized to 1/88 (half a
     // canvas px of the 44 px foot bar — invisible) so a slow timer doesn't re-mesh its tile every frame
     // (Plugin-Performance-Rules.md §5: the tile's graphic only changes when the shown fill moves).
@@ -167,29 +143,23 @@ public sealed partial class Plugin
         return MathF.Round(_tiles[idx].FillAt(Environment.TickCount64) * FillSteps) / FillSteps;
     }
 
-    private string SecondsLabel(int idx)
-    {
-        if (idx >= _tileCount) return "";
-        var t = _tiles[idx];
-        if (t.Permanent) return "∞";   // permanent — no expiry
-        // Truncate to whole ms like the old (int)(rem * 1000) snapshot so the formatted value is unchanged.
-        float secs = (int)(t.RemainAt(Environment.TickCount64) * 1000f) / 1000f;
-        string time = secs > 999f ? $"{(int)(secs / 60f)}m"
-                    : secs >= 10f  ? $"{(int)secs}s"
-                    :                $"{secs:F1}s";
-        if (t.Fallback) time = "*" + time;
-        return time;
-    }
-
     // Resolved display name for a tile — the source for the icon-less fallback badge. Skills use the game name;
     // buffs/debuffs route through the unified translated resolver so hidden effects get a distinct NameDesign label.
-    private string TileName(int idx)
+    // `known` = the game row exists, so the result is final and safe to cache (Plugin.Bar.Cache.cs TileAbbrev).
+    private string TileName(int idx, out bool known)
     {
+        known = false;
         if (idx >= _tileCount) return "";
         var t = _tiles[idx];
         if (t.Kind == TileKind.Cooldown)
-            return _services.GameData.Combat.GetSkill(t.Id)?.Name ?? "";
-        return TranslatedBuffText.ResolveLabel(t.Id, _services.GameData.Combat.GetBuff(t.Id)?.Name);
+        {
+            var sk = _services.GameData.Combat.GetSkill(t.Id);
+            known = sk != null;
+            return sk?.Name ?? "";
+        }
+        var bf = _services.GameData.Combat.GetBuff(t.Id);
+        known = bf != null;
+        return TranslatedBuffText.ResolveLabel(t.Id, bf?.Name);
     }
 
     // First two letter/digit characters of the (tag-stripped) name, uppercased. The framework draws this only when
