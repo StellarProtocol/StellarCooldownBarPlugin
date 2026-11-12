@@ -1,130 +1,133 @@
 using System;
-using System.IO;
-using System.Reflection;
 using Stellar.Abstractions.Domain;
 using Stellar.Abstractions.Services;
 
 namespace Stellar.CooldownBar;
 
-// The overlay element tree. Built ONCE; Funcs re-pull the live snapshot on the framework's capped refresh.
-// Active-only: a slot shows only while idx < _tileCount. Each active slot is a bespoke CooldownTileElement
-// (icon + accent outline + foot fill-bar + seconds + ★/charge badges) — cooldown = cyan, debuff = red.
-// Imagine-lockout debuffs render the source Imagine's artwork + a ★ badge.
+// The HUD bar's element tree, house style (approved redesign 2026-11-13, frame A + tiles T1). Built ONCE; Funcs re-pull
+// the live snapshot on the framework's refresh. Layout:
+//   caption row (28 px): bold "COOLDOWNS" + muted "· N active" … round 28 px gear (toggles Settings)
+//   up to 3 tile rows (Plugin.Bar.Tile.cs), the last visible one ending in a round "+N" chip on overflow
+//   or, with nothing active, the muted "Nothing active right now" (the window keeps its size — it is resizable/fixed).
+// The rounded theme panel behind all of it is the window ROOT's own Image, restyled in Plugin.Bar.Frame.cs, so it
+// fills the whole window rect at any resize size (a Bubble here would sit inside the 12 px chrome padding).
 // Every Func is wrapped in P(...) = CdPerf.Fn: the [CdPerf] "funcs" bucket when the probe is on, the bare lambda when off.
 public sealed partial class Plugin
 {
-    private static readonly ColorRgba CooldownCol = new(0.35f, 0.78f, 1.00f, 1f);   // cyan
-    private static readonly ColorRgba DebuffCol   = new(1.00f, 0.35f, 0.35f, 1f);   // red
-    private static readonly ColorRgba BuffCol     = new(0.35f, 1.00f, 0.50f, 1f);   // green
-    private static readonly ColorRgba MutedCol    = new(1.00f, 1.00f, 1.00f, 1f);   // white (borderless over world; relies on Shadow)
+    // Kind colours are FIXED (they carry meaning, spec "Platform"): skill cooldown cyan, debuff red, buff green;
+    // charge / stack gold.
+    private static readonly ColorRgba CooldownCol = new(0.35f, 0.78f, 1.00f, 1f);   // #59C7FF
+    private static readonly ColorRgba DebuffCol   = new(1.00f, 0.35f, 0.35f, 1f);   // #FF5959
+    private static readonly ColorRgba BuffCol     = new(0.35f, 1.00f, 0.50f, 1f);   // #59FF80
+    private static readonly ColorRgba ChargeCol   = new(1.00f, 0.84f, 0.35f, 1f);   // #FFD75A
 
     // Per-slot UV stash — Load* returns the sub-rect via out param; the tile's Uv Func reads it.
-    private readonly UvRect[] _uv = new UvRect[MaxTiles];
+    private readonly UvRect[] _uv = new UvRect[TileCap];
 
     private const int MaxTilesPerRow = MaxTiles / MaxRows;
+    private const float GearGlyph    = 16f;
+    private const float OverflowChipH = 24f;
 
     private HudElement BuildRoot()
     {
-        var gear = new CellElement(
-            new SelectableElement(
-                new ImageElement(P(() => GearPng()), 15, 15),
-                OnClick: () => _settings.SetVisible(!_settings.IsShown)),
-            Width: 26f);
-        var header = new RowElement(new HudElement[]
-        {
-            new TextElement(P(() => _loc.T("cd.barTitle")), P<ColorRgba?>(() => MutedCol), Shadow: true),
-            new SpacerElement(),
-            gear,
-        });
+        var rows = new HudElement[MaxRows];
+        for (int r = 0; r < MaxRows; r++) rows[r] = BuildTileRow(r);
 
-        // Row 1: columns 0..MaxTilesPerRow-1 → tiles 0.._tilesPerRow-1
-        var row1 = new HudElement[MaxTilesPerRow + 1];   // +1 for +N overflow label
-        for (int i = 0; i < MaxTilesPerRow; i++)
-        {
-            int c = i;
-            row1[i] = new ConditionalElement(
-                P(() => c < _tilesPerRow && c < _tileCount),
-                new CooldownTileElement(
-                    Icon:        P(() => TileIcon(c)),
-                    Uv:          P(() => _uv[c]),
-                    Fill01:      P(() => TileFill(c)),
-                    Seconds:     P(() => SecondsLabel(c)),
-                    Accent:      P(() => AccentColor(c)),
-                    IsImagine:   P(() => false),
-                    ChargeCount: P(() => c < _tileCount ? _tiles[c].ChargeCount : 0))
-                { OnClick = () => OnTileClick(c), FallbackLabel = P(() => TileAbbrev(c)) });
-        }
-        row1[MaxTilesPerRow] = new ConditionalElement(
-            P(() => _rowsVisible < 2 && _totalTileCount > _tileCount),
-            new TextElement(P(OverflowLabel), P<ColorRgba?>(() => MutedCol), Shadow: true));
-
-        // Row 2: columns 0..MaxTilesPerRow-1 → tiles _tilesPerRow.._tilesPerRow+col
-        var row2 = new HudElement[MaxTilesPerRow + 1];
-        for (int i = 0; i < MaxTilesPerRow; i++)
-        {
-            int c = i;
-            row2[i] = new ConditionalElement(
-                P(() => c < _tilesPerRow && _tilesPerRow + c < _tileCount),
-                new CooldownTileElement(
-                    Icon:        P(() => TileIcon(_tilesPerRow + c)),
-                    Uv:          P(() => _uv[_tilesPerRow + c]),
-                    Fill01:      P(() => TileFill(_tilesPerRow + c)),
-                    Seconds:     P(() => SecondsLabel(_tilesPerRow + c)),
-                    Accent:      P(() => AccentColor(_tilesPerRow + c)),
-                    IsImagine:   P(() => false),
-                    ChargeCount: P(() => { int ti = _tilesPerRow + c; return ti < _tileCount ? _tiles[ti].ChargeCount : 0; }))
-                { OnClick = () => OnTileClick(_tilesPerRow + c), FallbackLabel = P(() => TileAbbrev(_tilesPerRow + c)) });
-        }
-        row2[MaxTilesPerRow] = new ConditionalElement(
-            P(() => _rowsVisible == 2 && _totalTileCount > _tileCount),
-            new TextElement(P(OverflowLabel), P<ColorRgba?>(() => MutedCol), Shadow: true));
-
-        // Row 3: columns 0..MaxTilesPerRow-1 → tiles 2*_tilesPerRow..2*_tilesPerRow+col
-        var row3 = new HudElement[MaxTilesPerRow + 1];
-        for (int i = 0; i < MaxTilesPerRow; i++)
-        {
-            int c = i;
-            row3[i] = new ConditionalElement(
-                P(() => c < _tilesPerRow && _tilesPerRow * 2 + c < _tileCount),
-                new CooldownTileElement(
-                    Icon:        P(() => TileIcon(_tilesPerRow * 2 + c)),
-                    Uv:          P(() => _uv[_tilesPerRow * 2 + c]),
-                    Fill01:      P(() => TileFill(_tilesPerRow * 2 + c)),
-                    Seconds:     P(() => SecondsLabel(_tilesPerRow * 2 + c)),
-                    Accent:      P(() => AccentColor(_tilesPerRow * 2 + c)),
-                    IsImagine:   P(() => false),
-                    ChargeCount: P(() => { int ti = _tilesPerRow * 2 + c; return ti < _tileCount ? _tiles[ti].ChargeCount : 0; }))
-                { OnClick = () => OnTileClick(_tilesPerRow * 2 + c), FallbackLabel = P(() => TileAbbrev(_tilesPerRow * 2 + c)) });
-        }
-        row3[MaxTilesPerRow] = new ConditionalElement(
-            P(() => _rowsVisible >= 3 && _totalTileCount > _tileCount),
-            new TextElement(P(OverflowLabel), P<ColorRgba?>(() => MutedCol), Shadow: true));
-
-        var hint = new ConditionalElement(
-            P(() => _tileCount == 0),
-            new TextElement(P(() => _loc.T("cd.empty")), P<ColorRgba?>(() => MutedCol), Shadow: true));
-
-        var tileRows = new ColumnElement(new HudElement[]
-        {
-            new RowElement(row1, Gap: 6f),
-            new ConditionalElement(P(() => _rowsVisible >= 2 && _tileCount > _tilesPerRow),
-                new RowElement(row2, Gap: 6f)),
-            new ConditionalElement(P(() => _rowsVisible >= 3 && _tileCount > _tilesPerRow * 2),
-                new RowElement(row3, Gap: 6f)),
-        }, Gap: 6f);
+        var empty = new TextElement(P(() => _loc.T("cd.empty")), P<ColorRgba?>(() => MutedText()), NoWrap: true, Shadow: true)
+            { Ellipsize = true };
 
         return new ColumnElement(new HudElement[]
         {
-            header,
-            new SeparatorElement(),
-            hint,
-            tileRows,
-        }, Gap: 2f);
+            BuildBarCaption(),
+            // One child either way (a no-else Conditional collapses fully; this one always shows one arm), so the
+            // caption → content gap is always exactly TileVGap.
+            new ConditionalElement(P(() => _totalTileCount == 0), empty,
+                new ColumnElement(rows, Gap: TileVGap)),
+        }, Gap: TileVGap);
     }
 
-    private ColorRgba AccentColor(int idx)
+    // Row r: slots c → tile r·_tilesPerRow + c, then the "+N" chip when this is the last visible row and tiles overflow.
+    // A row collapses (no-else Conditional) when it is beyond the visible rows or has no tile in it.
+    private HudElement BuildTileRow(int r)
     {
-        if (idx >= _tileCount) return CooldownCol;
+        var cells = new HudElement[MaxTilesPerRow + 1];
+        for (int i = 0; i < MaxTilesPerRow; i++)
+        {
+            int c = i;
+            cells[i] = new ConditionalElement(
+                P(() => c < _tilesPerRow && r * _tilesPerRow + c < _tileCount),
+                BuildTile(() => r * _tilesPerRow + c, BarGeom));   // Plugin.Bar.Tile.cs
+        }
+        cells[MaxTilesPerRow] = new ConditionalElement(
+            P(() => _rowsVisible == r + 1 && _totalTileCount > _tileCount),
+            OverflowChip());
+        var row = new RowElement(cells, Gap: TileHGap);
+        if (r == 0) return row;
+        return new ConditionalElement(P(() => _rowsVisible > r && _tileCount > r * _tilesPerRow), row);
+    }
+
+    // "COOLDOWNS" (bold, UPPERCASE) + muted "· N active" (N = every active tile, overflow included) in a weighted,
+    // ellipsized cell that is also the flexible spacer, then the round gear. The 28 px gear pins the row height.
+    // Shadow (user-approved 2026-11-13): every bar text outside a tile card keeps the readability outline so it still reads
+    // with Background at 0 %. ⚠️ A Shadow text takes the toolkit's LEGACY Text path (WindowBuilder.BuildText: Shadow skips
+    // the TMP faces), so FontSize / RichEmoji are ignored there: these draw at the fixed 14 px, Bold = synthetic bold.
+    private HudElement BuildBarCaption() => new RowElement(new HudElement[]
+    {
+        new TextElement(P(UpperCached(() => _loc.T("cd.barTitle"))), P<ColorRgba?>(() => TextColor()), NoWrap: true,
+            FontSize: 12, Shadow: true) { Bold = true },
+        new CellElement(new TextElement(P(ActiveCaption), P<ColorRgba?>(() => MutedText()), NoWrap: true, FontSize: 12, Shadow: true)
+            { Ellipsize = true }, Weight: 1f),
+        GearButton(),
+    }, Gap: 6f);
+
+    private readonly FmtCache _activeFmt = new();
+    private string ActiveCaption() => _activeFmt.Get(_loc.T("cd.bar.active"), _totalTileCount);
+
+    // Round 28 × 28 icon-only gear: clear at rest, a soft MenuText @10 % wash on hover (a round Bubble around a Bare
+    // selectable — the default square wash must never show on a round control). Toggles the Settings window. The
+    // embedded gear PNG (the ⚙ glyph has no in-game font coverage) is centred at 16 px.
+    private HudElement GearButton()
+    {
+        var hover = new HoverFlag();
+        float pad = (IconButtonSize - GearGlyph) / 2f;
+        return new BubbleElement(new SelectableElement(new RowElement(new HudElement[]
+            {
+                new SpacerElement(pad, IconButtonSize),
+                new ImageElement(P(() => CachedPng("settings-gear.png")), (int)GearGlyph, (int)GearGlyph),
+                new SpacerElement(pad, IconButtonSize),
+            }, Gap: 0.01f, Justify: RowJustify.Center),
+            OnClick: ToggleSettings) { Bare = true, OnHover = over => hover.On = over })
+        {
+            FillColorFn = P<ColorRgba?>(() => hover.On ? TextColor() with { A = HoverMix } : Transparent),
+            CornerRadius = RoundRadius(IconButtonSize), PaddingX = 0f, PaddingY = 0f,
+        };
+    }
+
+    // Round "+N" chip: 24 px tall, MenuText @14 % fill, bold Text with the readability shadow (legacy 14 px, see above).
+    // FIXED width (house R10: a changing label never resizes anything): the label sits in a box that fits the longest
+    // case, "+99" (OverflowLabel caps there) = 23.7 px in the legacy 14 px bold face (Arial Bold: 1.696 em), so "+5" and
+    // "+12" draw in the same 38 × 24 capsule. Align Center on a fixed-width box centres the label: the legacy path sets
+    // alignByGeometry, which centres the drawn glyphs (CenterGlyphs is the TMP twin of that and is ignored on Shadow text).
+    // The old natural-width chip sat directly in a Conditional with MaxWidth 0, so it latched its first width and "+12"
+    // spilled off-centre (WindowBuilder-Patterns.md: give every fixed-width chip an explicit MaxWidth).
+    private const float OverflowLabelW = 24f;
+    private const float OverflowPadX   = 7f;
+
+    private HudElement OverflowChip() => new BubbleElement(new RowElement(new HudElement[]
+        {
+            new SpacerElement(0f, OverflowChipH),
+            new TextElement(P(OverflowLabel), P<ColorRgba?>(() => TextColor()), Width: OverflowLabelW, Align: TextAlign.Center,
+                NoWrap: true, FontSize: 12, Shadow: true) { Bold = true, CenterGlyphs = true },
+        }, Gap: 0.01f, Justify: RowJustify.Center))
+    {
+        FillColorFn = P<ColorRgba?>(() => TextColor() with { A = 0.14f }),
+        CornerRadius = RoundRadius(OverflowChipH), PaddingX = OverflowPadX, PaddingY = 0f,
+        MaxWidth = OverflowLabelW + 2f * OverflowPadX,
+    };
+
+    private ColorRgba KindColor(int idx)
+    {
+        if (!SlotValid(idx)) return CooldownCol;
         return _tiles[idx].Kind switch
         {
             TileKind.Debuff => DebuffCol,
@@ -137,7 +140,7 @@ public sealed partial class Plugin
     // chose smooth fills without pixel rounding (2026-11-12, "smooth, no item 8").
     private float TileFill(int idx)
     {
-        if (idx >= _tileCount) return 0f;
+        if (!SlotValid(idx)) return 0f;
         return _tiles[idx].FillAt(Environment.TickCount64);
     }
 
@@ -147,7 +150,7 @@ public sealed partial class Plugin
     private string TileName(int idx, out bool known)
     {
         known = false;
-        if (idx >= _tileCount) return "";
+        if (!SlotValid(idx)) return "";
         var t = _tiles[idx];
         if (t.Kind == TileKind.Cooldown)
         {
@@ -160,8 +163,8 @@ public sealed partial class Plugin
         return TranslatedBuffText.ResolveLabel(t.Id, bf?.Name);
     }
 
-    // First two letter/digit characters of the (tag-stripped) name, uppercased. The framework draws this only when
-    // an effect has no icon, so normal (icon-bearing) tiles are unaffected. (Copied from TargetLens.)
+    // First two letter/digit characters of the (tag-stripped) name, uppercased. Drawn only when an effect has no icon,
+    // so normal (icon-bearing) tiles are unaffected. (Copied from TargetLens.)
     private static string Abbrev(string name)
     {
         name = StripTags(name);
@@ -174,24 +177,5 @@ public sealed partial class Plugin
         }
         if (a == '\0') return "";
         return b == '\0' ? a.ToString() : new string(new[] { a, b });
-    }
-
-    // Embedded settings-gear PNG bytes (cached). Same resource StatInspector ships; the ⚙ glyph has no in-game
-    // font coverage, so a PNG icon is the reliable gear. Null if the resource is missing → ImageElement draws nothing.
-    private byte[]? _gearPng;
-    private bool _gearFailed;
-    private byte[]? GearPng()
-    {
-        if (_gearPng != null || _gearFailed) return _gearPng;
-        try
-        {
-            using var s = Assembly.GetExecutingAssembly().GetManifestResourceStream("Stellar.CooldownBar.settings-gear.png");
-            if (s == null) { _gearFailed = true; return null; }
-            using var ms = new MemoryStream();
-            s.CopyTo(ms);
-            _gearPng = ms.ToArray();
-        }
-        catch { _gearFailed = true; }
-        return _gearPng;
     }
 }

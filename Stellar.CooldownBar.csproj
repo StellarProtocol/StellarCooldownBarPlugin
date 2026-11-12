@@ -9,17 +9,18 @@
     <NoWarn>CS8632;CS8765</NoWarn>
     <RootNamespace>Stellar.CooldownBar</RootNamespace>
     <AssemblyName>Stellar.CooldownBar</AssemblyName>
-    <Version>2.3.0</Version>
+    <Version>2.4.0</Version>
     <Deterministic>true</Deterministic>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
   <ItemGroup>
-    <!-- i18n P2: consumes IPluginServices.Localization (framework 2.1.0). Bumped to 2.3.0 for the
-         i18n-ko launcher-tile fix: LauncherEntry.TitleProvider (live-localized tile title) was added
-         in Abstractions 2.3.0 — additive/binary-compatible per framework/CHANGELOG.md [2.3.0]. -->
-    <PackageReference Include="Stellar.Abstractions"       Version="2.3.0" />
-    <PackageReference Include="Stellar.PluginContracts"    Version="2.0.0" />
-    <PackageReference Include="Stellar.Plugin.InteropRefs" Version="2.0.0" />
+    <!-- 2.30.0 for the house-style redesign: BubbleElement OutlineColorFn / FillColorFn, Selectable Bare +
+         OnClickWithRect, TextElement Height / MaxLines, theme status colours (IThemeStatusColors), WindowSpec
+         Prebuild / FixedHeight. Players need framework >= 2.30.0. -->
+    <!-- Version 2.30.0 matches TargetLens / ChatTools; all three packages move together (one ABI). -->
+    <PackageReference Include="Stellar.Abstractions"       Version="2.30.0" />
+    <PackageReference Include="Stellar.PluginContracts"    Version="2.30.0" />
+    <PackageReference Include="Stellar.Plugin.InteropRefs" Version="2.30.0" />
   </ItemGroup>
 
   <!-- Settings-gear icon (read by LogicalName for the mini-HUD header button). Without it the published DLL
@@ -31,6 +32,8 @@
     <EmbeddedResource Include="Resources\BuffTable.json" LogicalName="Stellar.CooldownBar.BuffTable.json" />
     <!-- Launcher-tile icon (read by LogicalName for the Stellar-menu entry). -->
     <EmbeddedResource Include="Resources/cooldownbar-icon.png" LogicalName="Stellar.CooldownBar.cooldownbar-icon.png" />
+    <!-- Settings header hourglass glyph: white, pre-drawn per size (tools/gen_hourglass_icon.py), on the live accent tile. -->
+    <EmbeddedResource Include="Resources/hourglass-*.png" LogicalName="Stellar.CooldownBar.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

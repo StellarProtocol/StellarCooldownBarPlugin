@@ -19,6 +19,10 @@ public sealed partial class Plugin
     private string[] _stBaseNames = Array.Empty<string>();
     private string[] _stBaseDescs = Array.Empty<string>();
     private bool     _stBaseLoaded;
+    // Id sets for SelectionNormalizer.MapSkill (the bar's resolution + the stale-id conversion): what the list shows
+    // (the table filtered by "Hidden effects") and every SkillTable row (unfiltered). Replaced on each table load.
+    private HashSet<int> _stListSet = new();
+    private HashSet<int> _stAllSet  = new();
     // Base skill ids the bar has actually displayed. Folded into the Skills tab so every cooldown that can appear
     // on the bar is toggleable — including placeholder-named skills the game's SkillTable doesn't list (owner 2026-08-19).
     private readonly HashSet<int> _seenSkillIds = new();
@@ -64,13 +68,24 @@ public sealed partial class Plugin
     private int      _btOffset    = 0;
     private readonly UvRect[] _btUv = new UvRect[SettingsPoolSize];
     private bool     _buffTabLoaded = false;
+    // Every BuffTable row id (debuffs and buffs, unfiltered — hidden effects included): the stale-id conversion keeps a
+    // saved tick that is in no listed group but still a real effect (SelectionNormalizer.Groups). Replaced on each load.
+    private HashSet<int> _buffAllSet = new();
 
     // ── Lazy loaders (idempotent: called from VirtualListElement Count func) ──
+    // Both finish any in-flight sliced walk synchronously (Plugin.Settings.TableLoad.cs): the caller needs the rows now.
 
     private void EnsureSkillTabLoaded()
     {
-        if (!_stBaseLoaded) { LoadSettingsSkillTable(); _stBaseLoaded = _stBaseIds.Length > 0; _seenDirty = true; }
-        if (_stBaseLoaded && _seenDirty) { RebuildMergedSkills(); ApplySkillTabFilter(_stFilter); _seenDirty = false; }
+        if (!_stBaseLoaded) StepSkillLoad(Unbounded);
+        AfterSkillLoad();
+    }
+
+    // The merged list (base table + bar-seen extras), its filter and the placed set: once after a load, and again
+    // whenever the seen set grows.
+    private void AfterSkillLoad()
+    {
+        if (_stBaseLoaded && _seenDirty) { RebuildMergedSkills(); ApplySkillTabFilter(_stFilter); _seenDirty = false; OnTrackedChanged(); }
     }
 
     // Fold bar-seen skills (placeholder-named / SkillTable-absent) into the Skills tab so every cooldown that can
@@ -83,6 +98,7 @@ public sealed partial class Plugin
         var have  = new HashSet<int>(_stBaseIds);
         foreach (var id in _seenSkillIds)
         {
+            if (!_stAllSet.Contains(id)) continue;             // only real SkillTable rows (never a sub-id like 392301)
             if (!have.Add(id)) continue;                       // already in the base table (or a dup) — skip
             var info = _services.GameData.Combat.GetSkill(id);
             var nm   = info?.Name;
@@ -95,149 +111,7 @@ public sealed partial class Plugin
 
     private void EnsureBuffTabLoaded()
     {
-        if (_buffTabLoaded) return;
-        LoadSettingsBuffTable();
-        _buffTabLoaded = _dtCount > 0 || _btCount > 0;
-        if (_dtCount > 0) ApplyDebuffTabFilter(_dtFilter);
-        if (_btCount > 0) ApplyBuffTabFilter(_btFilter);
-    }
-
-    // ── Table loaders ─────────────────────────────────────────────────────────
-
-    private void LoadSettingsSkillTable()
-    {
-        try
-        {
-            var t = StellarInterop.FindType("Bokura.SkillTableBase") ?? StellarInterop.FindType("SkillTableBase");
-            if (t == null) { _services.Log.Warning("[Settings] SkillTableBase not found"); return; }
-
-            MethodInfo? miGet = null;
-            foreach (var m in t.GetMethods(BindingFlags.Public | BindingFlags.Static))
-            {
-                if (m.Name != "GetTable") continue;
-                var ps = m.GetParameters();
-                if (ps.Length == 1 && ps[0].ParameterType == typeof(bool)) { miGet = m; break; }
-            }
-            if (miGet == null) { _services.Log.Warning("[Settings] SkillTableBase.GetTable not found"); return; }
-
-            var tbl    = miGet.Invoke(null, new object[] { false });
-            if (tbl == null) return;
-            var values = tbl.GetType().GetProperty("Values", BindingFlags.Public | BindingFlags.Instance)
-                             ?.GetValue(tbl) ?? tbl;
-
-            var ids = new List<int>(); var names = new List<string>();
-            PropertyInfo? piKvp = null, piId = null, piName = null, piIcon = null, piDesc = null;
-            var descs = new List<string>();
-
-            foreach (var item in SettingsReflectEnumerate(values))
-            {
-                if (item == null) continue;
-                object? row = item;
-                if (piKvp == null && piId == null)
-                {
-                    var kv = item.GetType().GetProperty("Value", BindingFlags.Public | BindingFlags.Instance);
-                    if (kv != null) piKvp = kv;
-                }
-                if (piKvp != null) row = piKvp.GetValue(item);
-                if (row == null) continue;
-                if (piId == null)
-                {
-                    var rt = row.GetType();
-                    piId   = rt.GetProperty("Id",   BindingFlags.Public | BindingFlags.Instance);
-                    piName = rt.GetProperty("Name", BindingFlags.Public | BindingFlags.Instance);
-                    piIcon = rt.GetProperty("Icon", BindingFlags.Public | BindingFlags.Instance);
-                    piDesc = rt.GetProperty("Desc", BindingFlags.Public | BindingFlags.Instance);
-                }
-                int id   = (int)(piId?.GetValue(row) ?? 0);
-                if (id <= 0) continue;
-                string name = (string?)(piName?.GetValue(row)) ?? "";
-                string icon = (string?)(piIcon?.GetValue(row)) ?? "";
-                // Show-hidden: keep every id>0 row. An unnamed hidden skill still needs a usable list label.
-                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(icon))
-                {
-                    if (!_showHidden) continue;
-                    if (string.IsNullOrEmpty(name)) name = $"Skill {id}";
-                }
-                string desc = (string?)(piDesc?.GetValue(row)) ?? "";
-                ids.Add(id); names.Add(name); descs.Add(desc);
-            }
-            _stBaseIds = ids.ToArray(); _stBaseNames = names.ToArray(); _stBaseDescs = descs.ToArray();
-            _services.Log.Info($"[Settings] loaded {_stBaseIds.Length} skills");
-        }
-        catch (Exception ex)
-        {
-            _services.Log.Warning($"[Settings] LoadSkillTable: {ex.InnerException?.Message ?? ex.Message}");
-        }
-    }
-
-    private void LoadSettingsBuffTable()
-    {
-        try
-        {
-            var t = StellarInterop.FindType("Bokura.BuffTableBase") ?? StellarInterop.FindType("BuffTableBase");
-            if (t == null) { _services.Log.Warning("[Settings] BuffTableBase not found"); return; }
-
-            MethodInfo? miGet = null;
-            foreach (var m in t.GetMethods(BindingFlags.Public | BindingFlags.Static))
-            {
-                if (m.Name != "GetTable") continue;
-                var ps = m.GetParameters();
-                if (ps.Length == 1 && ps[0].ParameterType == typeof(bool)) { miGet = m; break; }
-            }
-            if (miGet == null) { _services.Log.Warning("[Settings] BuffTableBase.GetTable not found"); return; }
-
-            var tbl    = miGet.Invoke(null, new object[] { false });
-            if (tbl == null) return;
-            var values = tbl.GetType().GetProperty("Values", BindingFlags.Public | BindingFlags.Instance)
-                             ?.GetValue(tbl) ?? tbl;
-
-            // Group by display Name (exact match, first-seen order). name → group index into the parallel lists.
-            var dGroups = new BuffGroupAccumulator();
-            var bGroups = new BuffGroupAccumulator();
-            // Show-hidden uses the resolved label (game Name for real buffs, NameDesign for hidden ones) BOTH as the
-            // display name and the grouping key, so distinct hidden buffs don't collapse into one placeholder blob.
-            if (_showHidden) TranslatedBuffText.EnsureLoaded();   // no-op once started; labels fall back until it lands
-            PropertyInfo? piKvp = null, piId = null, piName = null, piIcon = null, piType = null, piDesc = null;
-
-            foreach (var item in SettingsReflectEnumerate(values))
-            {
-                if (item == null) continue;
-                object? row = item;
-                if (piKvp == null && piId == null)
-                {
-                    var kv = item.GetType().GetProperty("Value", BindingFlags.Public | BindingFlags.Instance);
-                    if (kv != null) piKvp = kv;
-                }
-                if (piKvp != null) row = piKvp.GetValue(item);
-                if (row == null) continue;
-                if (piId == null)
-                {
-                    var rt = row.GetType();
-                    piId   = rt.GetProperty("Id",       BindingFlags.Public | BindingFlags.Instance);
-                    piName = rt.GetProperty("Name",     BindingFlags.Public | BindingFlags.Instance);
-                    piIcon = rt.GetProperty("Icon",     BindingFlags.Public | BindingFlags.Instance);
-                    piType = rt.GetProperty("BuffType", BindingFlags.Public | BindingFlags.Instance);
-                    piDesc = rt.GetProperty("Desc",     BindingFlags.Public | BindingFlags.Instance);
-                }
-                int id = (int)(piId?.GetValue(row) ?? 0);
-                if (id <= 0) continue;
-                string gameName = (string?)(piName?.GetValue(row)) ?? "";
-                string icon = (string?)(piIcon?.GetValue(row)) ?? "";
-                if (!_showHidden && (string.IsNullOrEmpty(gameName) || string.IsNullOrEmpty(icon))) continue;
-                string desc = (string?)(piDesc?.GetValue(row)) ?? "";
-                int buffType = (int)(piType?.GetValue(row) ?? -1);
-                // OFF: keep today's behaviour (raw game Name). ON: resolved label for display + grouping.
-                string name = _showHidden ? TranslatedBuffText.ResolveLabel(id, gameName) : gameName;
-                (buffType == 0 ? dGroups : bGroups).Add(name, id, desc);
-            }
-            dGroups.Export(out _dtIds, out _dtNames, out _dtDescs, out _dtMembers, out _dtCount);
-            bGroups.Export(out _btIds, out _btNames, out _btDescs, out _btMembers, out _btCount);
-            _services.Log.Info($"[Settings] loaded {_dtCount} debuff groups, {_btCount} buff groups");
-        }
-        catch (Exception ex)
-        {
-            _services.Log.Warning($"[Settings] LoadBuffTable: {ex.InnerException?.Message ?? ex.Message}");
-        }
+        if (!_buffTabLoaded) StepBuffLoad(Unbounded);   // publishes, re-syncs the placed set and re-applies the filters
     }
 
     // ── Filters ───────────────────────────────────────────────────────────────
@@ -245,6 +119,7 @@ public sealed partial class Plugin
     private void ApplySkillTabFilter(string text)
     {
         _stFilter = text; _stOffset = 0;
+        _selVersion++; _selScrollReset = true;   // re-sorted rows: slot caches + counts recompute, list back to the top
         SettingsFilterTable(text, _stIds, _stNames, _stDescs, _stCount,
             _selection.IsCooldownTracked, out _stFiltIds, out _stFiltNames, out _stFiltDescs, out _stFiltCount);
     }
@@ -252,6 +127,7 @@ public sealed partial class Plugin
     private void ApplyDebuffTabFilter(string text)
     {
         _dtFilter = text; _dtOffset = 0;
+        _selVersion++; _selScrollReset = true;   // re-sorted rows: slot caches + counts recompute, list back to the top
         SettingsFilterGroups(text, _dtIds, _dtNames, _dtDescs, _dtMembers, _dtCount, _selection.IsDebuffTracked,
             out _dtFiltIds, out _dtFiltNames, out _dtFiltDescs, out _dtFiltMembers, out _dtFiltCount);
     }
@@ -259,6 +135,7 @@ public sealed partial class Plugin
     private void ApplyBuffTabFilter(string text)
     {
         _btFilter = text; _btOffset = 0;
+        _selVersion++; _selScrollReset = true;   // re-sorted rows: slot caches + counts recompute, list back to the top
         SettingsFilterGroups(text, _btIds, _btNames, _btDescs, _btMembers, _btCount, _selection.IsBuffTracked,
             out _btFiltIds, out _btFiltNames, out _btFiltDescs, out _btFiltMembers, out _btFiltCount);
     }
@@ -321,23 +198,6 @@ public sealed partial class Plugin
         if (members.Length == 0) return false;
         for (int i = 0; i < members.Length; i++) if (!isTracked(members[i])) return false;
         return true;
-    }
-
-    // ── IL2CPP duck-typed enumerator (same as Experiment) ────────────────────
-
-    private static IEnumerable<object?> SettingsReflectEnumerate(object collection)
-    {
-        var t  = collection.GetType();
-        var mi = t.GetMethod("GetEnumerator", BindingFlags.Public | BindingFlags.Instance);
-        if (mi == null) yield break;
-        var enumerator = mi.Invoke(collection, null);
-        if (enumerator == null) yield break;
-        var et     = enumerator.GetType();
-        var miNext = et.GetMethod("MoveNext",  BindingFlags.Public | BindingFlags.Instance);
-        var piCur  = et.GetProperty("Current", BindingFlags.Public | BindingFlags.Instance);
-        if (miNext == null || piCur == null) yield break;
-        while ((bool)(miNext.Invoke(enumerator, null) ?? false))
-            yield return piCur.GetValue(enumerator);
     }
 
     // Collapses per-id buff/debuff rows into Name-groups in first-seen order. The first row of a Name becomes the
