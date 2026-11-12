@@ -106,6 +106,7 @@ public sealed partial class Plugin : IStellarPlugin
 
     public void Dispose()
     {
+        FlushBgSave();   // an opacity drag released just before unload still persists
         _launcherEntry.Dispose();
         _services.Framework.Update -= OnUpdate;
         SkillCDPatch.Uninstall();
@@ -147,6 +148,7 @@ public sealed partial class Plugin : IStellarPlugin
             }
         }
         if (TranslatedBuffText.ConsumeLoaded(out var loadMsg)) OnTranslatedTextLoaded(loadMsg);   // one int read/frame
+        BgSaveTick();             // Plugin.Settings.cs — debounced config write after an opacity-slider drag
         TickTooltipPlace();       // Plugin.Tooltip.cs — re-assert cursor rect after destroy-on-hide remount
         LogSnapshotDiag(deltaTime);   // Plugin.Diagnostics.cs — gated on STELLAR_DIAGNOSTICS
         if (CdPerf.On) PerfTick(deltaTime, perfUpdate);   // Plugin.Perf.cs
