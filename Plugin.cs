@@ -192,6 +192,7 @@ public sealed partial class Plugin : IStellarPlugin
     {
         _services.Log.Info(msg);
         ClearBarCaches();   // Plugin.Bar.Cache.cs
+        if (_showHidden) _btJob = null;   // a half-done sliced buff walk used fallback labels: restart it
         if (_showHidden && _buffTabLoaded)
         {
             _buffTabLoaded = false;

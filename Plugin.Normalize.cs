@@ -11,8 +11,8 @@ namespace Stellar.CooldownBar;
 //
 // Eager load: the picker tables are otherwise built on the first Settings open. The skill table loads at world entry
 // every session (the bar's cooldown → skill mapping uses it). The buff table only until the conversion has run once per
-// install (config "track.normalized" records it) — and, in Placed mode, every session: Plugin.Placed.cs needs the groups. It is the existing one-shot reflection walk —
-// a single main-thread hitch, retried every 2 s while the game tables aren't ready.
+// install (config "track.normalized" records it) — and, in Placed mode, every session: Plugin.Placed.cs needs the groups. The reflection walks are time-sliced
+// (Plugin.Settings.TableLoad.cs, ≤2.5 ms per tick), retried every 2 s while the game tables aren't ready.
 public sealed partial class Plugin
 {
     // 2 = list-membership rule (SelectionNormalizer.cs). v1 asked the game whether an id had a named row and so kept
@@ -33,16 +33,34 @@ public sealed partial class Plugin
     // not loaded → load only what someone needs now. The SKILL table loads every session: the bar's live cooldown →
     // skill mapping is the list's (Plugin.Seen.cs ResolveNamedBaseSkill), so a 392301 cooldown matches the 3923 tick
     // from the first fight, not only after Settings was opened (one reflection walk per session, at world entry).
+    // Time-sliced (Plugin.Settings.TableLoad.cs): each table walk advances at most EagerSliceMs per tick and publishes
+    // only when complete; one step per tick (skill walk → buff walk → conversion), so no tick does two of them. The
+    // one-shot walks cost 11–30 ms in a single world-entry tick before ([Hitch] stellar.cooldownbar, 2026-11-13).
+    private const double EagerSliceMs = 2.5;
+    private static readonly long EagerSliceTicks = (long)(System.Diagnostics.Stopwatch.Frequency * EagerSliceMs / 1000.0);
+
     private void TickEagerTables()
     {
         bool loaded = _stBaseLoaded && _buffTabLoaded;
         if (_stBaseLoaded && (loaded ? _normDone : !NeedEagerTables)) return;
+        bool walking = _stJob != null || _btJob != null;
         long now = Environment.TickCount64;
-        if (now < _eagerTablesAt) return;
-        _eagerTablesAt = now + EagerTableRetryMs;
-        if (_services.ClientState.Phase != GamePhase.World) return;
-        EnsureSkillTabLoaded();
-        if (NeedEagerTables) EnsureBuffTabLoaded();
+        if (!walking && now < _eagerTablesAt) return;
+        // World down mid-walk (zone load, logout): drop the half-read walk; it restarts once the world is back.
+        if (_services.ClientState.Phase != GamePhase.World) { CancelTableLoads(); return; }
+        long deadline = System.Diagnostics.Stopwatch.GetTimestamp() + EagerSliceTicks;
+        if (!_stBaseLoaded)
+        {
+            if (!StepSkillLoad(deadline)) return;            // budget spent: resume next tick
+            AfterSkillLoad();                                // merged list + filter + placed set (cheap)
+            if (!_stBaseLoaded) _eagerTablesAt = now + EagerTableRetryMs;   // tables not ready: retry in 2 s
+            return;
+        }
+        if (NeedEagerTables && !_buffTabLoaded)
+        {
+            if (StepBuffLoad(deadline) && !_buffTabLoaded) _eagerTablesAt = now + EagerTableRetryMs;
+            return;                                          // the conversion runs on its own tick, after both tables
+        }
         TryNormalizeSelection();
     }
 

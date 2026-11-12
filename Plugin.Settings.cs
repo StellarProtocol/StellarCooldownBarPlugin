@@ -189,6 +189,7 @@ public sealed partial class Plugin
         // picker tables and rebuild them on next access, then re-apply the active search filters so an already-open
         // list repopulates immediately — without needing to close and reopen the settings window.
         ClearBarCaches();   // Plugin.Bar.Cache.cs — tile labels/icons re-resolve under the new mode
+        CancelTableLoads();  // an in-flight sliced walk read its rows under the old flag
         _buffTabLoaded = false;
         _stBaseLoaded  = false;
         _seenDirty     = true;
