@@ -182,6 +182,8 @@ internal static partial class BuffTrackPatch
                 }
                 catch (Exception ex) { LogError("server list", ex); }
             }
+            try { UpsertAlwaysShown(_localBuffComp, live); }   // Tables.cs — curated AlwaysShow ids while Show-hidden is off
+            catch (Exception ex) { LogError("always-shown", ex); }
         }
 
         if (_localClientBuffComp != null)

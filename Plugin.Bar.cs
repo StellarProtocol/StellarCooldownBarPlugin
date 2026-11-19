@@ -160,7 +160,7 @@ public sealed partial class Plugin
         }
         var bf = _services.GameData.Combat.GetBuff(t.Id);
         known = bf != null;
-        return TranslatedBuffText.ResolveLabel(t.Id, bf?.Name);
+        return EffectText.ResolveLabel(t.Id, bf?.Name);
     }
 
     // First two letter/digit characters of the (tag-stripped) name, uppercased. Drawn only when an effect has no icon,

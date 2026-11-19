@@ -115,8 +115,8 @@ public sealed partial class Plugin
         else
         {
             var info = _services.GameData.Combat.GetBuff(t.Id);
-            _tipName = StripTags(TranslatedBuffText.ResolveLabel(t.Id, info?.Name));
-            _tipDesc = StripTags(TranslatedBuffText.ResolveDesc(t.Id, info?.Description));
+            _tipName = StripTags(EffectText.ResolveLabel(t.Id, info?.Name));
+            _tipDesc = StripTags(EffectText.ResolveDesc(t.Id, info?.Description));
         }
         _tipTex      = TileIcon(idx);
         _tipUv       = _uv[idx];
@@ -143,8 +143,8 @@ public sealed partial class Plugin
             if (fi >= _dtFiltCount) return;
             int bid = _dtFiltIds[fi];
             var info = _services.GameData.Combat.GetBuff(bid);
-            _tipName = StripTags(TranslatedBuffText.ResolveLabel(bid, info?.Name));
-            _tipDesc = StripTags(TranslatedBuffText.ResolveDesc(bid, info?.Description));
+            _tipName = StripTags(EffectText.ResolveLabel(bid, info?.Name));
+            _tipDesc = StripTags(EffectText.ResolveDesc(bid, info?.Description));
             _tipTex  = DtIcon(idx);
             _tipUv   = _dtUv[idx];
         }
@@ -154,8 +154,8 @@ public sealed partial class Plugin
             if (fi >= _btFiltCount) return;
             int bid = _btFiltIds[fi];
             var info = _services.GameData.Combat.GetBuff(bid);
-            _tipName = StripTags(TranslatedBuffText.ResolveLabel(bid, info?.Name));
-            _tipDesc = StripTags(TranslatedBuffText.ResolveDesc(bid, info?.Description));
+            _tipName = StripTags(EffectText.ResolveLabel(bid, info?.Name));
+            _tipDesc = StripTags(EffectText.ResolveDesc(bid, info?.Description));
             _tipTex  = BtIcon(idx);
             _tipUv   = _btUv[idx];
         }

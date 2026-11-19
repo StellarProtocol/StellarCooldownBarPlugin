@@ -10,7 +10,7 @@ namespace Stellar.CooldownBar;
 //    (CdTimeFormat.Key: tenths < 10 s, seconds < 100 s, minutes < 100 min, hours above; permanent / '*' folded in).
 //  • Charge / stack chip: one string per slot, rebuilt when the count changes.
 //  • Fallback badge (Abbrev(TileName)): cached per (kind, id) — it never changes for an id. Only cached once the game
-//    record exists (tables can load late), and cleared when the translated buff text arrives (TranslatedBuffText).
+//    record exists (tables can load late), and cleared when the translated buff text arrives (EffectText — on IGameText.Ready).
 //  • Icon: resolved texture + UV per (kind, id, icon skill), SUCCESSFUL loads only. Loads are async (null while
 //    loading), so a miss is retried — every 200 ms for the first 2 s, then about once per second. A hit on a lower
 //    tier of the fallback chain (e.g. the plain skill icon while the Imagine art is still loading) is kept but the
@@ -102,7 +102,7 @@ public sealed partial class Plugin
     private static int BestIconTier(in TrackedTile t)
     {
         if (t.Kind == TileKind.Cooldown || t.IconSkillId > 0) return 0;
-        return TranslatedBuffText.EffectOverrides.TryGetValue(t.Id, out var ov) && ov.IconSkill > 0 ? 2 : 4;
+        return EffectText.TryGetOverride(t.Id, out var ov) && ov.IconSkill > 0 ? 2 : 4;
     }
 
     // The original fallback chain, unchanged, reporting which tier hit.
@@ -123,7 +123,7 @@ public sealed partial class Plugin
             tier = 0; tex = ga.LoadImagineIcon(t.IconSkillId, out uv); if (tex != null) return tex;
             tier = 1; tex = ga.LoadSkillIcon(t.IconSkillId, out uv);   if (tex != null) return tex;
         }
-        if (TranslatedBuffText.EffectOverrides.TryGetValue(t.Id, out var ov) && ov.IconSkill > 0)
+        if (EffectText.TryGetOverride(t.Id, out var ov) && ov.IconSkill > 0)
         {
             tier = 2; tex = ga.LoadImagineIcon(ov.IconSkill, out uv); if (tex != null) return tex;
             tier = 3; tex = ga.LoadSkillIcon(ov.IconSkill, out uv);   if (tex != null) return tex;

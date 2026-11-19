@@ -58,9 +58,6 @@ public sealed partial class Plugin
         {
             var walk = TableWalk.Open("Bokura.BuffTableBase", "BuffTableBase", _services.Log, "BuffTable");
             if (walk == null) return true;
-            // Show-hidden uses the resolved label (game Name for real buffs, NameDesign for hidden ones) BOTH as the
-            // display name and the grouping key, so distinct hidden buffs don't collapse into one placeholder blob.
-            if (_showHidden) TranslatedBuffText.EnsureLoaded();   // no-op once started; labels fall back until it lands
             _btJob = new BuffTableLoad(walk, _showHidden);
         }
         bool done;
@@ -244,12 +241,18 @@ public sealed partial class Plugin
             All.Add(id);   // before the Hidden-effects filter
             string gameName = (string?)(_piName?.GetValue(row)) ?? "";
             string icon = (string?)(_piIcon?.GetValue(row)) ?? "";
-            if (!ShowHidden && (string.IsNullOrEmpty(gameName) || string.IsNullOrEmpty(icon))) return;
+            // A curated override (EffectText.cs) can list a hidden row even with "Show hidden" off (AlwaysShow), give it its
+            // name, and file it under Buffs whatever its BuffType (AsBuff — placeholder rows default to type 0 "Debuff").
+            bool hasOv = EffectText.TryGetOverride(id, out var ov);
+            if (!ShowHidden && !(hasOv && ov.AlwaysShow) && (string.IsNullOrEmpty(gameName) || string.IsNullOrEmpty(icon))) return;
             string desc = (string?)(_piDesc?.GetValue(row)) ?? "";
             int buffType = (int)(_piType?.GetValue(row) ?? -1);
-            // OFF: keep today's behaviour (raw game Name). ON: resolved label for display + grouping.
-            string name = ShowHidden ? TranslatedBuffText.ResolveLabel(id, gameName) : gameName;
-            (buffType == 0 ? Debuffs : Buffs).Add(name, id, desc);
+            // OFF: keep today's behaviour (raw game Name), except a curated override name. ON: the resolved label (game Name
+            // for real buffs, the English design name for hidden ones) for display AND grouping, so distinct hidden buffs
+            // don't collapse into one placeholder blob.
+            string name = ShowHidden || (hasOv && ov.Name.Length > 0) ? EffectText.ResolveLabel(id, gameName) : gameName;
+            bool debuff = buffType == 0 && !(hasOv && ov.AsBuff);
+            (debuff ? Debuffs : Buffs).Add(name, id, desc);
         }
     }
 }

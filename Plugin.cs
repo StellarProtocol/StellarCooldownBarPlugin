@@ -53,7 +53,7 @@ public sealed partial class Plugin : IStellarPlugin
         _showHidden = _cfg.Get("bar.show_hidden", false);
         _hideEmpty  = _cfg.Get("bar.hide_empty", false);
         BuffTrackPatch.ShowHidden = _showHidden;               // full-vs-showed buff list source for the bar
-        TranslatedBuffText.EnsureLoaded();   // English NameDesign labels — parsed on a background task; OnUpdate polls ConsumeLoaded
+        EffectText.GameText = services.GameText;   // English buff labels: the framework's central game text (EffectText.cs)
         _selection = CooldownBarSelection.Load(_cfg);
         InitNormalize();      // Plugin.Normalize.cs — has the stale-id conversion run on this install?
         _attr = new DebuffAttribution(
@@ -97,6 +97,9 @@ public sealed partial class Plugin : IStellarPlugin
           ShouldShow = () => _services.ClientState.Phase == GamePhase.World });
 
         _services.Framework.Update += OnUpdate;
+        // Subscribing starts the game text's background load; Ready fires once on the main thread (also when it was already
+        // loaded) → re-resolve the labels computed from the game-name fallback meanwhile. Last, so every field it touches is set.
+        _services.GameText.Ready += OnGameTextReady;
     }
 
     // Borderless window (chrome-less, HUD-like) via WindowBuilder — the icon-capable render path. Its rounded theme
@@ -136,6 +139,8 @@ public sealed partial class Plugin : IStellarPlugin
         FlushBgSave();   // an opacity drag released just before unload still persists
         _launcherEntry.Dispose();
         _services.Framework.Update -= OnUpdate;
+        _services.GameText.Ready -= OnGameTextReady;
+        EffectText.GameText = null;
         SkillCDPatch.Uninstall();
         BuffTrackPatch.Uninstall();
         _toggleAction.Dispose();
@@ -194,7 +199,6 @@ public sealed partial class Plugin : IStellarPlugin
         }
         TickEagerTables();        // Plugin.Normalize.cs — table load + stale-id conversion, until done
         TickPlaced();             // Plugin.Placed.cs — placed-window sync on a selection change, edit-mode icon fade
-        if (TranslatedBuffText.ConsumeLoaded(out var loadMsg)) OnTranslatedTextLoaded(loadMsg);   // one int read/frame
         BgSaveTick();             // Plugin.Settings.cs — debounced config write after an opacity-slider drag
         TickTooltipPlace();       // Plugin.Tooltip.cs — re-assert cursor rect after destroy-on-hide remount
         TickSettingsUi();         // Plugin.Settings.Open.cs — help re-anchor, open centring, Untick-all confirm timeout
@@ -202,12 +206,12 @@ public sealed partial class Plugin : IStellarPlugin
         if (CdPerf.On) PerfTick(deltaTime, perfUpdate);   // Plugin.Perf.cs
     }
 
-    // Main thread, once, when the background BuffTable.json parse lands (TranslatedBuffText). Labels resolved during the
-    // load window used the game-name fallback: drop the bar's cached badges, and if the Show-hidden picker tables were
-    // already built from fallback labels, rebuild them (now if the settings window is open, else on next access).
-    private void OnTranslatedTextLoaded(string msg)
+    // Main thread, once, when the framework game text (IGameText.Ready) is ready. Labels resolved during the load window
+    // used the game-name fallback: drop the bar's cached badges, and if the Show-hidden picker tables were already built
+    // from fallback labels, rebuild them (now if the settings window is open, else on next access).
+    private void OnGameTextReady()
     {
-        _services.Log.Info(msg);
+        _services.Log.Info("[CooldownBar] framework game text ready — buff labels re-resolved");
         ClearBarCaches();   // Plugin.Bar.Cache.cs
         if (_showHidden) _btJob = null;   // a half-done sliced buff walk used fallback labels: restart it
         if (_showHidden && _buffTabLoaded)

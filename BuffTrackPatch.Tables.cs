@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using Stellar.Abstractions.Services;
 
@@ -41,10 +42,44 @@ internal static partial class BuffTrackPatch
         return _getShowedBuffList?.Invoke(comp);
     }
 
+    // ── Always-shown overrides while Show-hidden is OFF ─────────────────────────
+    // A curated AlwaysShow buff (EffectText.cs, e.g. Dreamlike Arrow Rain) is a hidden placeholder row, so the game's
+    // display-filtered list may leave it out. With Show-hidden off, one extra walk of the FULL list upserts only those
+    // ids (an int read + a set lookup per buff; no allocation). Own accessor cache: the full list's type can differ from
+    // the showed list's, and sharing one cache would re-bind both every refresh.
+    private static Type?                       _aswListType;
+    private static Func<object, long>?         _aswCount;
+    private static Func<object, int, object?>? _aswItem;
+
+    private static void UpsertAlwaysShown(object comp, HashSet<int> live)
+    {
+        if (ShowHidden || EffectText.AlwaysShownIds.Count == 0) return;   // ON: the main pass already reads the full list
+        if (!_fullListResolved) ResolveFullBuffList(comp);
+        var list = _getFullBuffList?.Invoke(comp);
+        if (list == null || !EnsureListAccess(list, ref _aswListType, ref _aswCount, ref _aswItem)) return;
+        for (int i = 0, n = (int)_aswCount!(list); i < n; i++)
+        {
+            var item = ItemAt(_aswItem!, list, i);
+            if (item == null) continue;
+            if (!_buffItemFieldsResolved) ResolveBuffItemFields(item);
+            if (_bItemUuid == null || _bItemBaseId == null) return;
+            int baseId = (int)_bItemBaseId(item);
+            if (!EffectText.AlwaysShownIds.Contains(baseId)) continue;
+            int uuid = (int)_bItemUuid(item);
+            if (uuid == 0 || !live.Add(uuid)) continue;   // already read by the showed-list pass
+            int layer     = _bItemLayer      != null ? (int)_bItemLayer(item)  : 1;
+            int level     = _bItemLevel      != null ? (int)_bItemLevel(item)  : 0;
+            long durMs    = _bItemDuration   != null ? _bItemDuration(item)    : 0L;
+            long createMs = _bItemCreateTime != null ? _bItemCreateTime(item)  : 0L;
+            UpsertServerBuff(uuid, baseId, layer, level, durMs, createMs);
+        }
+    }
+
     // Reset the show-hidden list caches on Uninstall (called from BuffTrackPatch.cs Uninstall).
     private static void ResetShowHiddenCaches()
     {
         _getFullBuffList = null; _fullListResolved = false;
+        _aswListType = null; _aswCount = null; _aswItem = null;
     }
 
     // ── Server clock (true buff remaining = CreateTime + Duration − serverNow) ────
@@ -140,9 +175,16 @@ internal static partial class BuffTrackPatch
             string gameName = (string?)(_piBuffRowName?.GetValue(row)) ?? "";
             string icon     = (string?)(_piBuffRowIcon?.GetValue(row)) ?? "";
             hidden   = string.IsNullOrEmpty(gameName) || string.IsNullOrEmpty(icon);
-            name     = TranslatedBuffText.ResolveLabel(baseId, gameName);
+            name     = EffectText.ResolveLabel(baseId, gameName);
             visible  = (int?)(_piBuffRowVisible?.GetValue(row));
             buffType = (int?)(_piBuffRowType?.GetValue(row));
+            // Curated override (EffectText.cs), the same decision the picker makes: AlwaysShow = not hidden (the off-mode
+            // bar keeps it), AsBuff = BuffType 1 "Gain", so the bar's buff pass (not the debuff pass) picks it up.
+            if (EffectText.TryGetOverride(baseId, out var ov))
+            {
+                if (ov.AlwaysShow) hidden = false;
+                if (ov.AsBuff) buffType = 1;
+            }
             skillId  = (int?)(_piBuffRowSkillId?.GetValue(row)) ?? 0;
         }
         catch { }
