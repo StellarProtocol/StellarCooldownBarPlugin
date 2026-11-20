@@ -136,7 +136,7 @@ public sealed partial class Plugin
     {
         _btFilter = text; _btOffset = 0;
         _selVersion++; _selScrollReset = true;   // re-sorted rows: slot caches + counts recompute, list back to the top
-        SettingsFilterGroups(text, _btIds, _btNames, _btDescs, _btMembers, _btCount, _selection.IsBuffTracked,
+        SettingsFilterGroups(text, _btIds, _btNames, _btDescs, _btMembers, _btCount, _isBuffTrackedFn ??= IsBuffTrackedOrGrouped,
             out _btFiltIds, out _btFiltNames, out _btFiltDescs, out _btFiltMembers, out _btFiltCount);
     }
 

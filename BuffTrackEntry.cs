@@ -7,6 +7,10 @@ public sealed class BuffTrackEntry
     public int    BuffUuid     { get; }
     public int    BuffBaseId   { get; internal set; }
     public string BuffName     { get; internal set; } = "";
+    /// <summary>The game row's RAW Name (client language, untranslated) — the key Settings groups buffs by, and what a
+    /// ticked name group matches (CooldownBarSelection.IsBuffGroupTracked). Identical for every member of a group even
+    /// when the bundled English table does not know a new season's id yet.</summary>
+    public string GroupName    { get; internal set; } = "";
     public int?   Visible      { get; internal set; }
     public int?   BuffType     { get; internal set; }   // 0=Debuff 1=Gain 2=GainRecovery 3=Item
     public bool   IsClientBuff { get; internal set; }

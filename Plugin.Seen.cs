@@ -6,6 +6,12 @@ namespace Stellar.CooldownBar;
 
 public sealed partial class Plugin
 {
+    // Buff tracked by id OR by its name group (CooldownBarSelection.IsBuffGroupTracked) — the one predicate Settings'
+    // ticked state, the placed sync and the group counts share. Raw names come from BuffTrackPatch's cached lookup.
+    private static readonly Func<int, string> _rawBuffNameFn = BuffTrackPatch.RawBuffName;
+    private bool IsBuffTrackedOrGrouped(int baseId)
+        => _selection.IsBuffTracked(baseId) || _selection.IsBuffGroupTracked(BuffTrackPatch.RawBuffName(baseId), _rawBuffNameFn);
+
     // ── Bar geometry (redesign T1 tile, 2026-11-13) ──────────────────────────────────────────────────────────────
     // Every size below is PINNED by the element tree (Plugin.Bar.Tile.cs / Plugin.Bar.cs), not estimated from fonts:
     //   tile  = card padding 3 + [icon 40 | gap 2 | bar 4 | gap 2 | footer 16] + padding 3 = 70 tall;
@@ -161,7 +167,8 @@ public sealed partial class Plugin
             if (entry.BuffType == 0) continue;                               // only buffs (not debuffs)
             if (!_showHidden && entry.Hidden) continue;  // off-mode skips internal/hidden buffs (empty game Name OR empty Icon) — matches the settings list gate
             if (entry.Duration > 0 && entry.RemainSec < 0.05f) continue;
-            bool bfInList = placed ? IsPlacedMember(TileKind.Buff, entry.BuffBaseId) : _selection.IsBuffTracked(entry.BuffBaseId);
+            bool bfInList = placed ? IsPlacedMember(TileKind.Buff, entry.BuffBaseId)
+                : _selection.IsBuffTracked(entry.BuffBaseId) || _selection.IsBuffGroupTracked(entry.GroupName, _rawBuffNameFn);
             if (buffExclude ? bfInList : !bfInList) continue;
 
             _tiles[n++] = new TrackedTile(TileKind.Buff, entry.BuffBaseId, false, entry.SkillId,

@@ -45,7 +45,7 @@ public sealed partial class Plugin
         if (_activeTab == 0) return _selection.IsCooldownTracked(_stFiltIds[i]);
         return _activeTab == 1
             ? GroupAllTracked(_dtFiltMembers[i], _isDebuffTrackedFn ??= _selection.IsDebuffTracked)
-            : GroupAllTracked(_btFiltMembers[i], _isBuffTrackedFn ??= _selection.IsBuffTracked);
+            : GroupAllTracked(_btFiltMembers[i], _isBuffTrackedFn ??= IsBuffTrackedOrGrouped);
     }
 
     // ── ticked counts per kind (header status, kind chips, footer, confirm, placed hint) ─────────────────────────
@@ -70,7 +70,7 @@ public sealed partial class Plugin
         }
         if (!_buffTabLoaded) { _dtTicked = _btTicked = TickPending; return; }
         _dtTicked = CountTicked(_dtMembers, _dtCount, _isDebuffTrackedFn ??= _selection.IsDebuffTracked);
-        _btTicked = CountTicked(_btMembers, _btCount, _isBuffTrackedFn ??= _selection.IsBuffTracked);
+        _btTicked = CountTicked(_btMembers, _btCount, _isBuffTrackedFn ??= IsBuffTrackedOrGrouped);
     }
 
     private bool TickCountsReady
@@ -269,6 +269,9 @@ public sealed partial class Plugin
                 if (_activeTab == 1) _selection.SetDebuff(id, on);
                 else                 _selection.SetBuff(id, on);
             }
+            // A buff NAME group is also ticked as a whole, so members a later season adds follow it (owner 2026-11-20).
+            if (_activeTab == 2 && members.Length > 0)
+                _selection.SetBuffGroup(members[0], _rawBuffNameFn(members[0]), on, _rawBuffNameFn);
         }
         _selection.Save(_cfg);
         _selVersion++;

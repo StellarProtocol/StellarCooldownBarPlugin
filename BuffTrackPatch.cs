@@ -240,9 +240,9 @@ internal static partial class BuffTrackPatch
             // Drop the freed buff's cached fight-source before the fallback so a stale source skill can't apply a
             // wrong borrowed icon. A skill-sourced new buff re-populates it via the OnAddBuff/OnBuffSync postfix.
             if (!isNew) _buffSourceSkillId.Remove(uuid);
-            GetBuffInfo(baseId, out var nm, out var vis, out var bt, out var sid, out var hidden);
+            GetBuffInfo(baseId, out var nm, out var vis, out var bt, out var sid, out var hidden, out var raw);
             if (sid == 0) _buffSourceSkillId.TryGetValue(uuid, out sid);
-            entry!.BuffBaseId = baseId; entry.BuffName = nm; entry.Hidden = hidden;
+            entry!.BuffBaseId = baseId; entry.BuffName = nm; entry.Hidden = hidden; entry.GroupName = raw;
             entry.Visible = vis; entry.BuffType = bt;
             entry.SkillId = sid; entry.SkillName = GetSkillName(sid);
         }
@@ -274,8 +274,8 @@ internal static partial class BuffTrackPatch
         bool reinit = isNew || entry!.BuffBaseId != buffId;
         if (reinit)
         {
-            GetBuffInfo(buffId, out var nm, out var vis, out var bt, out var sid, out var hidden);
-            entry!.BuffBaseId = buffId; entry.BuffName = nm; entry.Hidden = hidden;
+            GetBuffInfo(buffId, out var nm, out var vis, out var bt, out var sid, out var hidden, out var raw);
+            entry!.BuffBaseId = buffId; entry.BuffName = nm; entry.Hidden = hidden; entry.GroupName = raw;
             entry.Visible = vis; entry.BuffType = bt;
             entry.SkillId = sid; entry.SkillName = GetSkillName(sid);
         }

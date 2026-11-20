@@ -43,6 +43,32 @@ internal sealed class CooldownBarSelection
     /// <summary>Returns true when the buff with <paramref name="baseId"/> is in the tracked set.</summary>
     public bool IsBuffTracked(int baseId) => _buffs.Contains(baseId);
 
+    // GROUP intent (owner 2026-11-20: Season-4 Potion/Cuisine never showed). Settings tick buffs by NAME group, but only
+    // the ids existing at the time were saved. A group ticked as a whole is also kept as one representative buff id;
+    // any buff whose RAW game name equals the representative's counts as tracked, so the group follows every member a
+    // later season adds. An id, not a name string: names are in the client's language.
+    private readonly HashSet<int> _buffGroupReps = new();
+
+    /// <summary>Representative ids of the buff name groups ticked as a whole.</summary>
+    public IReadOnlyCollection<int> BuffGroupReps => _buffGroupReps;
+
+    /// <summary>True when <paramref name="rawName"/> is the raw game name of a ticked group's representative.</summary>
+    public bool IsBuffGroupTracked(string? rawName, Func<int, string> rawNameOf)
+    {
+        if (string.IsNullOrEmpty(rawName) || _buffGroupReps.Count == 0) return false;
+        foreach (var rep in _buffGroupReps)
+            if (string.Equals(rawNameOf(rep), rawName, StringComparison.Ordinal)) return true;
+        return false;
+    }
+
+    /// <summary>Ticks/unticks a whole buff name group: on records <paramref name="repId"/>; off drops every representative
+    /// whose raw name is <paramref name="rawName"/> (the group may have been recorded through another member).</summary>
+    public void SetBuffGroup(int repId, string rawName, bool on, Func<int, string> rawNameOf)
+    {
+        if (on) { _buffGroupReps.Add(repId); return; }
+        _buffGroupReps.RemoveWhere(rep => rep == repId || (rawName.Length > 0 && string.Equals(rawNameOf(rep), rawName, StringComparison.Ordinal)));
+    }
+
     /// <summary>Adds or removes <paramref name="skillId"/> from the tracked-cooldowns set.</summary>
     public void SetCooldown(int skillId, bool on)
     {
@@ -112,6 +138,13 @@ internal sealed class CooldownBarSelection
         foreach (var id in cfg.Get("track.skills",        Array.Empty<int>()) ?? Array.Empty<int>()) sel._skills.Add(id);
         foreach (var id in cfg.Get("track.debuffs",       Array.Empty<int>()) ?? Array.Empty<int>()) sel._debuffs.Add(id);
         foreach (var id in cfg.Get("track.buffs",         Array.Empty<int>()) ?? Array.Empty<int>()) sel._buffs.Add(id);
+        var groups = cfg.Get<int[]?>("track.buffGroups", null);
+        if (groups != null)
+            foreach (var rep in groups) sel._buffGroupReps.Add(rep);
+        else
+            // Saved before group tracking: a group whose EVERY Season-3 member is ticked was ticked as a whole.
+            foreach (var (rep, members) in KnownSeasonGroups.Buffs)
+                if (Array.TrueForAll(members, sel._buffs.Contains)) sel._buffGroupReps.Add(rep);
         foreach (var id in cfg.Get("track.imagineOptOut", Array.Empty<int>()) ?? Array.Empty<int>()) sel._imagineOptOut.Add(id);
         sel.SkillMode  = (TrackMode)cfg.Get("mode.skills",  0);
         sel.DebuffMode = (TrackMode)cfg.Get("mode.debuffs", 0);
@@ -125,6 +158,7 @@ internal sealed class CooldownBarSelection
         cfg.Set("track.skills",        _skills.ToArray());
         cfg.Set("track.debuffs",       _debuffs.ToArray());
         cfg.Set("track.buffs",         _buffs.ToArray());
+        cfg.Set("track.buffGroups",    _buffGroupReps.ToArray());
         cfg.Set("track.imagineOptOut", _imagineOptOut.ToArray());
         cfg.Set("mode.skills",  (int)SkillMode);
         cfg.Set("mode.debuffs", (int)DebuffMode);
