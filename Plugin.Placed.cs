@@ -158,7 +158,7 @@ public sealed partial class Plugin
         for (int i = 0; i < _stCount; i++)
             if (_selection.IsCooldownTracked(_stIds[i])) rows.Add((TileKind.Cooldown, _stIds[i], _stNames[i], new[] { _stIds[i] }));
         var isDb = _isDebuffTrackedFn ??= _selection.IsDebuffTracked;
-        var isBf = _isBuffTrackedFn ??= _selection.IsBuffTracked;
+        var isBf = _isBuffTrackedFn ??= IsBuffTrackedOrGrouped;
         for (int g = 0; g < _dtCount; g++)
             if (GroupAllTracked(_dtMembers[g], isDb)) rows.Add((TileKind.Debuff, _dtIds[g], _dtNames[g], _dtMembers[g]));
         for (int g = 0; g < _btCount; g++)

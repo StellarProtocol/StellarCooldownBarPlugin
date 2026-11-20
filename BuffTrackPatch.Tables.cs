@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System;
 using System.Reflection;
 using Stellar.Abstractions.Services;
@@ -111,15 +112,32 @@ internal static partial class BuffTrackPatch
     {
         _tableReflResolved = false;
         _miGetBuffTable = _miGetBuffRow = null; _buffTableInst = null;
+        _rawNameCache.Clear();
         _piBuffRowName = _piBuffRowIcon = _piBuffRowVisible = _piBuffRowType = _piBuffRowSkillId = null;
         _skillTableResolved = false;
         _skillTableInst = null; _miGetSkillRow = null; _piSkillRowName = null;
         _rowArgs[0] = null!;
     }
 
-    private static void GetBuffInfo(int baseId, out string name, out int? visible, out int? buffType, out int skillId, out bool hidden)
+    // Raw game Name per buff id, cached: the bar's per-frame group check (Plugin.Seen.cs) and Settings' ticked state
+    // resolve a group representative's name through here, and a reflective row read per frame would be a hot-path cost.
+    private static readonly Dictionary<int, string> _rawNameCache = new();
+
+    /// <summary>The buff's RAW game Name (empty when the table is not ready or the row is unknown; not cached then).</summary>
+    public static string RawBuffName(int baseId)
     {
-        name = ""; visible = null; buffType = null; skillId = 0; hidden = false;
+        if (_rawNameCache.TryGetValue(baseId, out var n)) return n;
+        GetBuffInfo(baseId, out _, out _, out _, out _, out _, out var raw);
+        if (raw.Length > 0) _rawNameCache[baseId] = raw;
+        return raw;
+    }
+
+    private static void GetBuffInfo(int baseId, out string name, out int? visible, out int? buffType, out int skillId, out bool hidden)
+        => GetBuffInfo(baseId, out name, out visible, out buffType, out skillId, out hidden, out _);
+
+    private static void GetBuffInfo(int baseId, out string name, out int? visible, out int? buffType, out int skillId, out bool hidden, out string rawName)
+    {
+        name = ""; visible = null; buffType = null; skillId = 0; hidden = false; rawName = "";
         if (!_tableReflResolved) ResolveBuffTable();
         if (_miGetBuffRow == null || _buffTableInst == null) return;   // table not ready → leave hidden=false so real buffs aren't hidden by a transient miss
         try
@@ -140,6 +158,7 @@ internal static partial class BuffTrackPatch
             string gameName = (string?)(_piBuffRowName?.GetValue(row)) ?? "";
             string icon     = (string?)(_piBuffRowIcon?.GetValue(row)) ?? "";
             hidden   = string.IsNullOrEmpty(gameName) || string.IsNullOrEmpty(icon);
+            rawName  = gameName;
             name     = TranslatedBuffText.ResolveLabel(baseId, gameName);
             visible  = (int?)(_piBuffRowVisible?.GetValue(row));
             buffType = (int?)(_piBuffRowType?.GetValue(row));
