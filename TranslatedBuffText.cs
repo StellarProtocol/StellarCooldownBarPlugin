@@ -11,18 +11,31 @@ namespace Stellar.CooldownBar;
 //
 // The live game BuffTableBase returns the build's Chinese strings; the bundled BuffTable.json (embedded, from the
 // community translation dump) carries the English text. We resolve name + description per these rules:
-//   Name = (Name == ""   || Name == Placeholder) ? NameDesign : Name
-//   Desc = (Desc == ""   || Desc == Placeholder) ? Note       : Desc
+//   Name = (Name == ""   || IsPlaceholderName(Name)) ? NameDesign : Name
+//   Desc = (Desc == ""   || IsPlaceholderName(Desc)) ? Note       : Desc
 // The "Name was empty or the placeholder" fact is retained (PlaceholderNamed) so ResolveLabel can prefer the game's
 // own localized name for REAL buffs while still handing hidden / placeholder-named buffs a distinct NameDesign.
 //
 // The JSON is a top-level object keyed by buff id; each row has Id/Name/NameDesign/Desc/Note (+ many fields we skip).
 // Parsed once on a BACKGROUND task (EnsureLoaded) into an id → (Name, Desc, PlaceholderNamed) map. System.Text.Json
 // ignores unused columns.
+//
+// The file = the 2.4.0 English community table (10,008 rows) + only the ids NEW in Season 4, copied raw from the game
+// table. 2.4.1 shipped the raw Season-4 table instead: its placeholder Name is the CHINESE 气刃突刺计数, not the English
+// one, so ~10k hidden buffs all got that label and named hidden buffs ("Physical immunity BUFF", 55226) vanished from
+// the picker (owner 2026-11-21). Never replace this file with a raw game dump — merge new ids in.
 internal static class TranslatedBuffText
 {
-    private const string Placeholder  = "Spirit Blade Thrust count";
-    private const string ResourceName = "Stellar.CooldownBar.BuffTable.json";
+    // The game's "unnamed" placeholder (every hidden / internal buff carries it as Name and Desc): the English client's
+    // string, and the Chinese source string the S4-only rows still carry. \u escapes: the match never depends on the source file's encoding.
+    private const string Placeholder   = "Spirit Blade Thrust count";
+    private const string PlaceholderCn = "气刃突刺计数";   // 气刃突刺计数
+    private const string ResourceName  = "Stellar.CooldownBar.BuffTable.json";
+
+    /// <summary>True for the game's unnamed-buff placeholder in either language. Also the guard that keeps a buff
+    /// name group from being keyed on it (CooldownBarSelection) — every hidden buff shares that raw name.</summary>
+    internal static bool IsPlaceholderName(string? s)
+        => s != null && (string.Equals(s, Placeholder, StringComparison.Ordinal) || string.Equals(s, PlaceholderCn, StringComparison.Ordinal));
 
     // Published once by the background loader (volatile: the main thread must see the fully built map, never a
     // half-built one). null = still loading.
@@ -53,6 +66,13 @@ internal static class TranslatedBuffText
         Task.Run(Load);
     }
 
+    /// <summary>Tests only: parse synchronously on the calling thread (no-op once a load has published).</summary>
+    internal static void LoadNowForTests()
+    {
+        Interlocked.Exchange(ref _started, 1);   // a later EnsureLoaded must not queue a second parse
+        if (_map == null) Load();
+    }
+
     private static void Load()
     {
         var sw  = Stopwatch.StartNew();
@@ -74,9 +94,9 @@ internal static class TranslatedBuffText
 
                     string name = Str(e, "Name");
                     string desc = Str(e, "Desc");
-                    bool placeholderNamed = name.Length == 0 || name == Placeholder;
-                    if (placeholderNamed)               name = Str(e, "NameDesign");
-                    if (desc.Length == 0 || desc == Placeholder) desc = Str(e, "Note");
+                    bool placeholderNamed = name.Length == 0 || IsPlaceholderName(name);
+                    if (placeholderNamed)                              name = Str(e, "NameDesign");
+                    if (desc.Length == 0 || IsPlaceholderName(desc))   desc = Str(e, "Note");
                     map[id] = (name, desc, placeholderNamed);
                 }
                 msg = $"[CooldownBar] translated buff text loaded: {map.Count} entries in {sw.ElapsedMilliseconds} ms";

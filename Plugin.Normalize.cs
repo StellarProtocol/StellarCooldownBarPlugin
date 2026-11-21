@@ -77,8 +77,12 @@ public sealed partial class Plugin
         var debuffs = SelectionNormalizer.Groups(_selection.DebuffIds, _dtMembers, _dtCount, _buffAllSet, ref converted, ref dropped);
         var buffs   = SelectionNormalizer.Groups(_selection.BuffIds,   _btMembers, _btCount, _buffAllSet, ref converted, ref dropped);
 
+        // 2.4.1 could record a group rep whose raw name is the unnamed placeholder (any Show-hidden row) — it then made
+        // every hidden buff count as tracked. Matching ignores such reps already; drop them from the config too. Here,
+        // not in CooldownBarSelection.Load: raw names need the game table, which this pass has just confirmed loaded.
+        int badReps = _selection.DropPlaceholderReps(_rawBuffNameFn);
         bool changed = !skills.SetEquals(_selection.SkillIds) || !debuffs.SetEquals(_selection.DebuffIds)
-                       || !buffs.SetEquals(_selection.BuffIds);
+                       || !buffs.SetEquals(_selection.BuffIds) || badReps > 0;
         if (changed)
         {
             _selection.ReplaceSkills(skills);
@@ -99,6 +103,6 @@ public sealed partial class Plugin
             ApplyBuffTabFilter(_btFilter);
             OnTrackedChanged();   // Plugin.Placed.cs — the placed set follows
         }
-        _services.Log.Info($"[CooldownBar] saved tracked ids normalised: converted {converted}, dropped {dropped}");
+        _services.Log.Info($"[CooldownBar] saved tracked ids normalised: converted {converted}, dropped {dropped}, placeholder group reps dropped {badReps}");
     }
 }

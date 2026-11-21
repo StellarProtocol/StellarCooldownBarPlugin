@@ -52,22 +52,38 @@ internal sealed class CooldownBarSelection
     /// <summary>Representative ids of the buff name groups ticked as a whole.</summary>
     public IReadOnlyCollection<int> BuffGroupReps => _buffGroupReps;
 
+    // A raw name that can NOT key a group: empty, or the game's unnamed placeholder. Every hidden / internal buff (~10k)
+    // carries the same placeholder raw Name, while Settings groups them by their distinct translated NameDesign label
+    // (Show hidden). Keyed on the raw name, ticking ONE such row ("Physical immunity BUFF") would count every hidden buff
+    // as tracked. Those rows stay tracked by id only (2.4.2).
+    private static bool Groupable(string? rawName) => !string.IsNullOrEmpty(rawName) && !TranslatedBuffText.IsPlaceholderName(rawName);
+
     /// <summary>True when <paramref name="rawName"/> is the raw game name of a ticked group's representative.</summary>
     public bool IsBuffGroupTracked(string? rawName, Func<int, string> rawNameOf)
     {
-        if (string.IsNullOrEmpty(rawName) || _buffGroupReps.Count == 0) return false;
+        if (_buffGroupReps.Count == 0 || !Groupable(rawName)) return false;
+        // A placeholder-named rep can't match here: rawName is already known not to be a placeholder (or empty).
         foreach (var rep in _buffGroupReps)
             if (string.Equals(rawNameOf(rep), rawName, StringComparison.Ordinal)) return true;
         return false;
     }
 
-    /// <summary>Ticks/unticks a whole buff name group: on records <paramref name="repId"/>; off drops every representative
-    /// whose raw name is <paramref name="rawName"/> (the group may have been recorded through another member).</summary>
+    /// <summary>Ticks/unticks a whole buff name group: on records <paramref name="repId"/> (never for an empty or
+    /// placeholder raw name — see <see cref="Groupable"/>); off drops every representative whose raw name is
+    /// <paramref name="rawName"/> (the group may have been recorded through another member).</summary>
     public void SetBuffGroup(int repId, string rawName, bool on, Func<int, string> rawNameOf)
     {
-        if (on) { _buffGroupReps.Add(repId); return; }
+        if (on) { if (Groupable(rawName)) _buffGroupReps.Add(repId); return; }
         _buffGroupReps.RemoveWhere(rep => rep == repId || (rawName.Length > 0 && string.Equals(rawNameOf(rep), rawName, StringComparison.Ordinal)));
     }
+
+    /// <summary>Drops every representative whose raw name is the unnamed placeholder — reps 2.4.1 recorded before the
+    /// guard. Returns how many were dropped. The reps' ids stay in the per-id set, so those rows stay ticked.
+    /// An EMPTY raw name is NOT dropped: the raw-name lookup also answers "" when its own table read failed, and dropping
+    /// then would lose a real group (Potion). An empty-named rep is inert anyway — <see cref="IsBuffGroupTracked"/>
+    /// never matches an empty name.</summary>
+    public int DropPlaceholderReps(Func<int, string> rawNameOf)
+        => _buffGroupReps.RemoveWhere(rep => TranslatedBuffText.IsPlaceholderName(rawNameOf(rep)));
 
     /// <summary>Adds or removes <paramref name="skillId"/> from the tracked-cooldowns set.</summary>
     public void SetCooldown(int skillId, bool on)
